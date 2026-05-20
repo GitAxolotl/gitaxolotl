@@ -1,5 +1,10 @@
 # GitAxolotl
 
+[![CI](https://github.com/GitAxolotl/gitaxolotl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GitAxolotl/gitaxolotl/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Vite](https://img.shields.io/badge/Vite-react--ts-646CFF?logo=vite)](https://vitejs.dev/)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FGitAxolotl%2Fgitaxolotl)
+
 > Network error regeneration dashboard for the GitLawB / OpenClaude ecosystem.
 
 GitAxolotl visualises infrastructure errors as a healing pipeline that flows
@@ -62,6 +67,28 @@ Static for now — `MOCK_ERRORS` (18), `MOCK_AGENTS` (6), and `LOG_SEEDS` (10
 cycling lines) live at the top of `App.tsx`. Swap them with a real feed
 when wiring to the GitLawB control plane.
 
+## Deploy
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FGitAxolotl%2Fgitaxolotl)
+
+The repo includes `vercel.json` for SPA rewrites and immutable asset caching.
+Click the button above, sign in to Vercel, and Vercel will detect Vite, run
+`npm run build`, and deploy `dist/` to a `*.vercel.app` URL automatically.
+
+To bind a custom domain (e.g. `gitaxolotl.gitlawb.app`) — in the Vercel project
+settings, add the domain and point a `CNAME` from the DNS provider to
+`cname.vercel-dns.com`.
+
+## Continuous integration
+
+Every push to `main` and every pull request triggers
+`.github/workflows/ci.yml`, which runs **lint → typecheck → build** on Node 22
+and uploads the `dist/` bundle as an artifact (7-day retention).
+
+Dependabot watches `package.json` weekly (Monday 09:00 Asia/Jakarta) and
+GitHub Actions monthly, grouping updates by react / vite / eslint /
+typescript.
+
 ## License
 
-MIT
+[MIT](LICENSE) © devgitlawb

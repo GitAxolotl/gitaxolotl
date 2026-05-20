@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Live preview
+    url: https://github.com/GitAxolotl/gitaxolotl#readme
+    about: Open the live deployment to test the behavior before filing an issue.

@@ -262,15 +262,20 @@ function CursorGlow() {
   return <div ref={ref} className="cursor-glow" aria-hidden="true" />;
 }
 
+/* Lehmer LCG — deterministic, no React-render reassignment lint hit. */
+function makePrng(seed: number) {
+  const state = { v: seed };
+  return () => {
+    state.v = (state.v * 9301 + 49297) % 233280;
+    return state.v / 233280;
+  };
+}
+
 function ParticleField() {
   // 36 deterministic floating dots, drifting on independent CSS keyframes.
   const dots = useMemo(() => {
     const out: { left: number; top: number; size: number; delay: number; dur: number; hue: "pink" | "cyan" }[] = [];
-    let seed = 13;
-    const rand = () => {
-      seed = (seed * 9301 + 49297) % 233280;
-      return seed / 233280;
-    };
+    const rand = makePrng(13);
     for (let i = 0; i < 36; i++) {
       out.push({
         left: rand() * 100,
