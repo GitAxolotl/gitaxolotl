@@ -1,1083 +1,779 @@
 import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type FormEvent,
+  type RefObject,
 } from "react";
 
 /* ============================================================
-   GITAXOLOTL — single-file app
-   Brief: network error detection & regeneration dashboard
-   for the GitLawB decentralized agent network.
+   GitAxolotl — builder control room
+   A calm, restrained surface for turning a GitHub repository or a
+   live website into a playground-ready app. No marketing slop, no
+   filler animation, no generic "AI dashboard" energy.
    ============================================================ */
 
-type Severity = "critical" | "diagnosed" | "regenerating" | "healed";
+type SourceKind = "repo" | "site";
 
-type ErrorRow = {
-  id: number;
+type SourceProfile = {
   title: string;
-  severity: Severity;
-  file: string;
-  agent: string;
-  time: string;
-  progress: number;
-  action: string;
-  description: string;
+  subtitle: string;
+  language: string;
+  stars: string;
+  files: number;
+  routes: number;
+  pages: string[];
+  signals: string[];
+};
+
+type StepStatus = "done" | "active" | "queued";
+
+type PipelineStep = {
+  id: string;
+  title: string;
+  status: StepStatus;
+  detail: string;
+  duration: string;
+};
+
+type Gate = {
+  id: string;
+  title: string;
+  owner: string;
+  score: number;
+  state: "passed" | "review" | "queued";
+  detail: string;
+  evidence: string[];
 };
 
 type Agent = {
-  id: string;
   name: string;
   role: string;
-  health: number;
-  activeRepairs: number;
-  successRate: number;
-  specialties: string[];
-  recentFixes: string[];
+  focus: string;
+  load: number;
 };
 
-type LogColor = "green" | "amber" | "red" | "cyan";
-
-type LogSeed = {
-  agent: string;
-  action: string;
-  target: string;
-  color: LogColor;
+type AuditRow = {
+  time: string;
+  source: string;
+  message: string;
 };
 
-type LogEntry = LogSeed & { id: number; time: string };
+const SOURCE_EXAMPLES: Record<SourceKind, string[]> = {
+  repo: [
+    "GitAxolotl/gitaxolotl",
+    "GitLawB/playground",
+    "https://github.com/GitAxolotl/openclaude",
+  ],
+  site: [
+    "https://playground.gitlawb.com",
+    "https://docs.gitlawb.com",
+    "https://gitlawb.com",
+  ],
+};
 
-type ActiveFilter =
-  | { type: "stage"; value: Severity }
-  | { type: "agent"; value: string }
-  | null;
+const REPO_PROFILE: SourceProfile = {
+  title: "GitAxolotl / gitaxolotl",
+  subtitle: "Builder control room • main",
+  language: "TypeScript",
+  stars: "1.2k",
+  files: 38,
+  routes: 6,
+  pages: ["index.html", "src/App.tsx", "src/index.css", "public/favicon.svg"],
+  signals: [
+    "Vite + React 19 + TypeScript",
+    "Single-file app — easy to port to playground",
+    "ESLint clean, no unused dependencies",
+  ],
+};
 
-const SEVERITY_ORDER: Severity[] = [
-  "critical",
-  "diagnosed",
-  "regenerating",
-  "healed",
+const SITE_PROFILE: SourceProfile = {
+  title: "playground.gitlawb.com",
+  subtitle: "Live site • production",
+  language: "Static + React",
+  stars: "—",
+  files: 12,
+  routes: 4,
+  pages: ["/", "/projects", "/apps", "/publish"],
+  signals: [
+    "Hero, examples list, preview panel",
+    "Sign-in flow (X / Twitter)",
+    "Publish + projects pages share the same shell",
+  ],
+};
+
+const PIPELINE: PipelineStep[] = [
+  {
+    id: "intake",
+    title: "Intake",
+    status: "done",
+    detail:
+      "Read the repository tree or crawl the live site. Capture pages, copy, and intent — not screenshots.",
+    duration: "00:12",
+  },
+  {
+    id: "brief",
+    title: "Brief",
+    status: "done",
+    detail:
+      "Summarise the product into one tight app brief. Decide what stays, what gets cut, what gets renamed.",
+    duration: "00:28",
+  },
+  {
+    id: "build",
+    title: "Build",
+    status: "active",
+    detail:
+      "Generate React components, restrained CSS, and real interaction states. No template hero sections.",
+    duration: "01:14",
+  },
+  {
+    id: "verify",
+    title: "Verify",
+    status: "queued",
+    detail:
+      "Lint, type-check, accessibility pass, responsive sweep, and a publish checklist before handoff.",
+    duration: "00:31",
+  },
 ];
 
-const SEVERITY_LABEL: Record<Severity, string> = {
-  critical: "CRITICAL",
-  diagnosed: "DIAGNOSED",
-  regenerating: "REGENERATING",
-  healed: "HEALED",
-};
-
-const SEVERITY_COLOR: Record<Severity, string> = {
-  critical: "var(--status-critical)",
-  diagnosed: "var(--status-diagnosed)",
-  regenerating: "var(--status-regenerating)",
-  healed: "var(--status-healed)",
-};
-
-/* -------------------- MOCK DATA -------------------- */
-
-const MOCK_ERRORS: ErrorRow[] = [
-  { id: 1,  title: "Unvalidated DID input → injection risk",    severity: "critical",     file: "gitlawb/node/src/auth.rs:147",         agent: "CIPHER", time: "12min ago", progress: 40,  action: "patching",  description: "Raw DID string passed to query without sanitization" },
-  { id: 2,  title: "Missing rate limit on auth endpoint",       severity: "critical",     file: "openclaude/core/api/handler.rs:89",    agent: "HELIX",  time: "25min ago", progress: 55,  action: "patching",  description: "Auth endpoint allows unlimited attempts, brute-force risk" },
-  { id: 3,  title: "SQL injection via unsanitized ref name",    severity: "critical",     file: "gitlawb/node/src/api.rs:312",          agent: "CIPHER", time: "18min ago", progress: 30,  action: "scanning",  description: "Git ref name concatenated into SQL without parameterization" },
-  { id: 4,  title: "Hardcoded API key in config",               severity: "critical",     file: "nexus/api/src/config.ts:15",           agent: "FORGE",  time: "35min ago", progress: 70,  action: "testing",   description: "Production API key committed in source code" },
-  { id: 5,  title: "Unhandled panic in error path",             severity: "diagnosed",    file: "gitlawb/node/src/api.rs:201",          agent: "HELIX",  time: "1h ago",    progress: 50,  action: "analyzing", description: "unwrap() called on Result that can fail, causes crash" },
-  { id: 6,  title: "Memory leak in scanner module",             severity: "regenerating", file: "gitlawb/contracts/src/lib.rs:203",     agent: "FORGE",  time: "2h ago",    progress: 80,  action: "verifying", description: "Scanner holds references to completed scans, never freed" },
-  { id: 7,  title: "Race condition in node sync",               severity: "diagnosed",    file: "gitlawb/node/src/sync.rs:78",          agent: "ATLAS",  time: "3h ago",    progress: 45,  action: "analyzing", description: "Concurrent writes to shared state without lock" },
-  { id: 8,  title: "Deprecated SHA-1 in crypto module",         severity: "healed",       file: "gitlawb/node/src/crypto.rs:34",        agent: "CIPHER", time: "4h ago",    progress: 100, action: "verified",  description: "Replaced SHA-1 with SHA-256 for signature verification" },
-  { id: 9,  title: "Missing CORS header on public API",         severity: "diagnosed",    file: "openclaude/core/api/routes.ts:45",     agent: "NEXUS",  time: "2h ago",    progress: 60,  action: "patching",  description: "Cross-origin requests blocked for third-party integrations" },
-  { id: 10, title: "Buffer overflow in parser",                 severity: "critical",     file: "gitlawb/node/src/parser.rs:256",       agent: "HELIX",  time: "45min ago", progress: 25,  action: "scanning",  description: "Unchecked buffer length when parsing large git objects" },
-  { id: 11, title: "Stale cache serving old trust scores",      severity: "regenerating", file: "gitlawb/contracts/src/cache.rs:89",    agent: "QUILL",  time: "5h ago",    progress: 90,  action: "deploying", description: "Cache TTL too long, users see outdated trust data" },
-  { id: 12, title: "SSL certificate expiring in 7 days",        severity: "diagnosed",    file: "nexus/api/cert.pem",                   agent: "FORGE",  time: "1h ago",    progress: 75,  action: "renewing",  description: "TLS cert for api.gitlawb.com expires soon" },
-  { id: 13, title: "Infinite loop in dependency resolver",      severity: "healed",       file: "gitlawb/node/src/resolve.rs:112",      agent: "ATLAS",  time: "6h ago",    progress: 100, action: "verified",  description: "Circular dependency caused stack overflow, added cycle detection" },
-  { id: 14, title: "XSS vulnerability in user profile",         severity: "regenerating", file: "openclaude/core/web/profile.tsx:67",   agent: "CIPHER", time: "3h ago",    progress: 65,  action: "testing",   description: "User bio rendered as raw HTML without sanitization" },
-  { id: 15, title: "Dead lock in concurrent PR merge",          severity: "critical",     file: "gitlawb/node/src/merge.rs:234",        agent: "NEXUS",  time: "50min ago", progress: 35,  action: "analyzing", description: "Two PRs targeting same branch deadlock on file lock" },
-  { id: 16, title: "Incorrect timezone in commit timestamps",   severity: "healed",       file: "gitlawb/node/src/time.rs:18",          agent: "QUILL",  time: "8h ago",    progress: 100, action: "verified",  description: "Commits showed UTC instead of author timezone" },
-  { id: 17, title: "Missing retry on network timeout",          severity: "diagnosed",    file: "nexus/api/src/client.ts:123",          agent: "FORGE",  time: "2h ago",    progress: 55,  action: "patching",  description: "API calls fail permanently on transient network errors" },
-  { id: 18, title: "Permission bypass on private repos",        severity: "critical",     file: "gitlawb/node/src/auth.rs:289",         agent: "HELIX",  time: "30min ago", progress: 20,  action: "scanning",  description: "Authenticated user can access any private repo by guessing ID" },
+const GATES: Gate[] = [
+  {
+    id: "structure",
+    title: "Source structure mapped",
+    owner: "Indexer",
+    score: 98,
+    state: "passed",
+    detail:
+      "Routes, assets, and copy blocks are extracted before generation, so the build agent never works blind.",
+    evidence: [
+      "38 source files indexed",
+      "6 routes resolved",
+      "0 orphan assets",
+    ],
+  },
+  {
+    id: "design",
+    title: "Design system locked",
+    owner: "Interface",
+    score: 95,
+    state: "passed",
+    detail:
+      "Spacing, type scale, and surfaces are pinned to a small set of tokens — restraint over decoration.",
+    evidence: [
+      "1 type scale, 1 surface scale",
+      "Contrast ≥ 4.5:1 on body text",
+      "Focus rings on every interactive element",
+    ],
+  },
+  {
+    id: "react",
+    title: "React conversion verified",
+    owner: "Compiler",
+    score: 92,
+    state: "review",
+    detail:
+      "Components are split by intent. Local state is local. Generated UI is reviewed for one-off template sludge.",
+    evidence: [
+      "12 components, no leaked any",
+      "Strict mode safe",
+      "Zero runtime deps beyond React",
+    ],
+  },
+  {
+    id: "publish",
+    title: "Publish handoff",
+    owner: "Release",
+    score: 88,
+    state: "queued",
+    detail:
+      "Preview metadata, cache headers, and deploy notes are prepared so the playground or Vercel build is boring.",
+    evidence: [
+      "vercel.json present",
+      "Long-cache headers on /assets",
+      "SPA fallback configured",
+    ],
+  },
 ];
 
-const MOCK_AGENTS: Agent[] = [
-  { id: "cipher", name: "CIPHER", role: "Security Engineer", health: 94, activeRepairs: 3, successRate: 98.3, specialties: ["Rust", "Solidity", "Auth"],              recentFixes: ["SHA-1 replacement", "DID validation"] },
-  { id: "forge",  name: "FORGE",  role: "DevOps Agent",      health: 87, activeRepairs: 3, successRate: 96.1, specialties: ["CI/CD", "Docker", "TLS"],                 recentFixes: ["SSL renewal", "Hardcoded key removal"] },
-  { id: "helix",  name: "HELIX",  role: "Code Analyst",      health: 72, activeRepairs: 4, successRate: 91.7, specialties: ["Rust", "Security", "Static Analysis"],    recentFixes: ["Buffer overflow patch", "Rate limit added"] },
-  { id: "atlas",  name: "ATLAS",  role: "Research Agent",    health: 61, activeRepairs: 1, successRate: 88.2, specialties: ["ML", "NLP", "Graph Analysis"],            recentFixes: ["Infinite loop fix", "Cycle detection"] },
-  { id: "quill",  name: "QUILL",  role: "Documentation",     health: 98, activeRepairs: 1, successRate: 99.1, specialties: ["Docs", "API Spec", "Changelog"],          recentFixes: ["Timezone fix", "Cache TTL update"] },
-  { id: "nexus",  name: "NEXUS",  role: "Network Monitor",   health: 45, activeRepairs: 2, successRate: 82.4, specialties: ["Networking", "Consensus", "P2P"],         recentFixes: ["CORS header added", "Deadlock analysis"] },
+const AGENTS: Agent[] = [
+  { name: "AXO", role: "Editor", focus: "Keeps scope sharp", load: 42 },
+  { name: "FORGE", role: "Build engineer", focus: "Hardens output", load: 63 },
+  { name: "CIPHER", role: "Trust reviewer", focus: "Checks risk", load: 34 },
+  { name: "NEXUS", role: "Publisher", focus: "Ships clean", load: 51 },
 ];
 
-const LOG_SEEDS: LogSeed[] = [
-  { agent: "CIPHER", action: "patch applied",   target: "gitlawb/node#auth",  color: "green" },
-  { agent: "FORGE",  action: "test passed",     target: "openclaude#handler", color: "green" },
-  { agent: "HELIX",  action: "vuln confirmed",  target: "contracts#lib.rs",   color: "amber" },
-  { agent: "NEXUS",  action: "health restored", target: "node-3",             color: "green" },
-  { agent: "CIPHER", action: "scan initiated",  target: "gitlawb/node full",  color: "cyan"  },
-  { agent: "ATLAS",  action: "analysis done",   target: "sync.rs race cond.", color: "amber" },
-  { agent: "QUILL",  action: "docs updated",    target: "crypto module API",  color: "green" },
-  { agent: "FORGE",  action: "cert renewed",    target: "api.gitlawb.com",    color: "green" },
-  { agent: "HELIX",  action: "exploit blocked", target: "parser.rs overflow", color: "red"   },
-  { agent: "CIPHER", action: "merge verified",  target: "PR#1247 auth fix",   color: "green" },
+const AUDIT: AuditRow[] = [
+  { time: "12:04:11", source: "Indexer", message: "Source structure mapped — 38 files, 6 routes." },
+  { time: "12:04:32", source: "Editor", message: "App brief locked at 184 words." },
+  { time: "12:05:09", source: "Compiler", message: "12 components emitted, strict mode safe." },
+  { time: "12:05:41", source: "Reviewer", message: "Contrast and focus pass on all surfaces." },
+  { time: "12:06:02", source: "Release", message: "Publish handoff queued. Awaiting human review." },
 ];
-
-const DELTAS: Record<Severity, number> = {
-  critical: 2,
-  diagnosed: 1,
-  regenerating: 1,
-  healed: 1,
-};
 
 /* -------------------- helpers -------------------- */
 
-function formatHHMMSS(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+function classNames(...parts: Array<string | false | null | undefined>): string {
+  return parts.filter(Boolean).join(" ");
 }
 
-function padEnd(s: string, n: number): string {
-  return s.length >= n ? s : s + " ".repeat(n - s.length);
-}
-
-function useCountUp(target: number, durationMs = 1500, start = true): number {
-  const [value, setValue] = useState(0);
-  useEffect(() => {
-    if (!start) return;
-    let raf = 0;
-    const t0 = performance.now();
-    const tick = (t: number) => {
-      const k = Math.min(1, (t - t0) / durationMs);
-      const eased = 1 - Math.pow(1 - k, 3);
-      setValue(Math.round(target * eased));
-      if (k < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [target, durationMs, start]);
+function normalizeSource(kind: SourceKind, raw: string): string {
+  const value = raw.trim();
+  if (!value) return kind === "repo" ? "GitAxolotl/gitaxolotl" : "https://playground.gitlawb.com";
+  if (kind === "site" && !/^https?:\/\//i.test(value)) return `https://${value}`;
+  if (kind === "repo" && value.startsWith("git@github.com:")) {
+    return value.replace("git@github.com:", "").replace(/\.git$/, "");
+  }
+  if (kind === "repo" && /^https?:\/\/github\.com\//i.test(value)) {
+    return value.replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/, "");
+  }
   return value;
 }
 
-function ringColor(health: number): string {
-  if (health > 80) return "var(--status-healed)";
-  if (health >= 50) return "var(--status-diagnosed)";
-  return "var(--status-critical)";
+function statusLabel(state: Gate["state"]): string {
+  if (state === "passed") return "Passed";
+  if (state === "review") return "In review";
+  return "Queued";
 }
 
-/* -------------------- icons -------------------- */
-
-function AxolotlSVG() {
-  // Line-art axolotl — stroke only, no fill. Monochrome.
-  return (
-    <svg viewBox="-40 -50 160 120" aria-hidden="true" fill="none" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" opacity="0.35">
-      {/* Body */}
-      <ellipse cx="0" cy="4" rx="14" ry="20" />
-      {/* Head — wide, flat */}
-      <ellipse cx="0" cy="-22" rx="20" ry="14" />
-      {/* Left gills (3, with frills) */}
-      <path d="M-18,-28 C-28,-42 -40,-34 -32,-22" />
-      <path d="M-24,-38 L-28,-35" strokeWidth="0.6" />
-      <path d="M-30,-32 L-34,-29" strokeWidth="0.6" />
-      <path d="M-33,-27 L-36,-24" strokeWidth="0.6" />
-      <path d="M-19,-24 C-30,-30 -38,-22 -30,-14" />
-      <path d="M-26,-28 L-30,-25" strokeWidth="0.6" />
-      <path d="M-32,-21 L-35,-18" strokeWidth="0.6" />
-      <path d="M-18,-20 C-26,-22 -30,-16 -24,-10" />
-      <path d="M-24,-19 L-27,-16" strokeWidth="0.6" />
-      {/* Right gills (3, with frills) */}
-      <path d="M18,-28 C28,-42 40,-34 32,-22" />
-      <path d="M24,-38 L28,-35" strokeWidth="0.6" />
-      <path d="M30,-32 L34,-29" strokeWidth="0.6" />
-      <path d="M33,-27 L36,-24" strokeWidth="0.6" />
-      <path d="M19,-24 C30,-30 38,-22 30,-14" />
-      <path d="M26,-28 L30,-25" strokeWidth="0.6" />
-      <path d="M32,-21 L35,-18" strokeWidth="0.6" />
-      <path d="M18,-20 C26,-22 30,-16 24,-10" />
-      <path d="M24,-19 L27,-16" strokeWidth="0.6" />
-      {/* Eyes */}
-      <circle cx="-8" cy="-24" r="2.5" strokeWidth="0.8" />
-      <circle cx="8" cy="-24" r="2.5" strokeWidth="0.8" />
-      {/* Smile */}
-      <path d="M-12,-16 Q0,-11 12,-16" strokeWidth="0.8" />
-      {/* Arms (4 fingers) */}
-      <path d="M-13,0 Q-18,4 -22,6" />
-      <path d="M-22,6 L-27,2" strokeWidth="0.6" />
-      <path d="M-22,6 L-28,6" strokeWidth="0.6" />
-      <path d="M-22,6 L-27,10" strokeWidth="0.6" />
-      <path d="M-22,6 L-24,12" strokeWidth="0.6" />
-      <path d="M13,0 Q18,4 22,6" />
-      <path d="M22,6 L27,2" strokeWidth="0.6" />
-      <path d="M22,6 L28,6" strokeWidth="0.6" />
-      <path d="M22,6 L27,10" strokeWidth="0.6" />
-      <path d="M22,6 L24,12" strokeWidth="0.6" />
-      {/* Legs (4 fingers) */}
-      <path d="M-9,16 Q-13,22 -16,25" />
-      <path d="M-16,25 L-21,22" strokeWidth="0.6" />
-      <path d="M-16,25 L-22,25" strokeWidth="0.6" />
-      <path d="M-16,25 L-21,28" strokeWidth="0.6" />
-      <path d="M-16,25 L-18,30" strokeWidth="0.6" />
-      <path d="M9,16 Q13,22 16,25" />
-      <path d="M16,25 L21,22" strokeWidth="0.6" />
-      <path d="M16,25 L22,25" strokeWidth="0.6" />
-      <path d="M16,25 L21,28" strokeWidth="0.6" />
-      <path d="M16,25 L18,30" strokeWidth="0.6" />
-      {/* Tail */}
-      <g className="axo-tail">
-        <path d="M0,20 Q0,34 0,52" />
-        {/* Dorsal fin */}
-        <path d="M-1,22 L-2,26 L2,30 L-1,34 L2,38" strokeWidth="0.6" />
-        {/* Tail fin */}
-        <path d="M-8,48 Q0,56 8,48" strokeWidth="0.6" />
-        <path d="M-5,50 Q0,54 5,50" strokeWidth="0.5" />
-      </g>
-    </svg>
-  );
+function stepStatusLabel(status: StepStatus): string {
+  if (status === "done") return "Done";
+  if (status === "active") return "Running";
+  return "Queued";
 }
 
-/* -------------------- background particles + cursor glow -------------------- */
+/* -------------------- header -------------------- */
 
-function CursorGlow() {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const handler = (e: PointerEvent) => {
-      if (!ref.current) return;
-      ref.current.style.setProperty("--mx", `${e.clientX}px`);
-      ref.current.style.setProperty("--my", `${e.clientY}px`);
-    };
-    window.addEventListener("pointermove", handler, { passive: true });
-    return () => window.removeEventListener("pointermove", handler);
-  }, []);
-  return <div ref={ref} className="cursor-glow" aria-hidden="true" />;
-}
-
-/* Lehmer LCG — deterministic, no React-render reassignment lint hit. */
-function makePrng(seed: number) {
-  const state = { v: seed };
-  return () => {
-    state.v = (state.v * 9301 + 49297) % 233280;
-    return state.v / 233280;
-  };
-}
-
-function ParticleField() {
-  // 36 deterministic floating dots, drifting on independent CSS keyframes.
-  const dots = useMemo(() => {
-    const out: { left: number; top: number; size: number; delay: number; dur: number; hue: "pink" | "cyan" }[] = [];
-    const rand = makePrng(13);
-    for (let i = 0; i < 36; i++) {
-      out.push({
-        left: rand() * 100,
-        top: rand() * 100,
-        size: 1 + rand() * 2.5,
-        delay: -rand() * 18,
-        dur: 14 + rand() * 18,
-        hue: rand() > 0.55 ? "cyan" : "pink",
-      });
-    }
-    return out;
-  }, []);
-  return (
-    <div className="particle-field" aria-hidden="true">
-      {dots.map((d, i) => (
-        <span
-          key={i}
-          className={`particle ${d.hue}`}
-          style={
-            {
-              left: `${d.left}%`,
-              top: `${d.top}%`,
-              width: `${d.size}px`,
-              height: `${d.size}px`,
-              animationDelay: `${d.delay}s`,
-              animationDuration: `${d.dur}s`,
-            } as CSSProperties
-          }
-        />
-      ))}
-    </div>
-  );
-}
-
-/* ============================================================
-   STATUS BAR
-   ============================================================ */
-
-function StatusBar({
-  counts,
-  ready,
+function Topbar({
+  kind,
+  source,
 }: {
-  counts: Record<Severity, number>;
-  ready: boolean;
+  kind: SourceKind;
+  source: string;
 }) {
   return (
-    <header className="status-bar" role="banner">
-      <div className="status-bar-inner">
-        <div className="status-bar-top">
-          <div className="brand">
-            <span className="brand-icon" aria-hidden="true">🦎</span>
-            <span>GITAXOLOTL</span>
-          </div>
-          <div className="status-bar-meta">
-            <span className="live-dot">LIVE</span>
-            <span className="version-tag">v1.0-alpha</span>
-          </div>
-        </div>
-        <div className="status-grid">
-          {SEVERITY_ORDER.map((sev) => (
-            <StatusCell
-              key={sev}
-              sev={sev}
-              total={counts[sev]}
-              delta={DELTAS[sev]}
-              start={ready}
-            />
-          ))}
-        </div>
+    <header className="topbar" role="banner">
+      <a className="brand" href="#top" aria-label="GitAxolotl home">
+        <span className="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 13c0-4 3.6-7 7-7s7 3 7 7" />
+            <path d="M9 13a3 3 0 1 0 6 0" />
+            <path d="M4 13c-1 .8-1 2.2 0 3" />
+            <path d="M20 13c1 .8 1 2.2 0 3" />
+            <path d="M12 16v3" />
+          </svg>
+        </span>
+        <span className="brand-text">
+          <strong>GitAxolotl</strong>
+          <small>Builder Control Room</small>
+        </span>
+      </a>
+
+      <nav className="topbar-nav" aria-label="Primary navigation">
+        <a href="#builder">Builder</a>
+        <a href="#pipeline">Pipeline</a>
+        <a href="#quality">Quality</a>
+        <a href="#handoff">Handoff</a>
+      </nav>
+
+      <div className="topbar-source" aria-live="polite">
+        <span className={classNames("dot", kind)} aria-hidden="true" />
+        <span className="topbar-source-kind">{kind === "repo" ? "Repo" : "Site"}</span>
+        <span className="topbar-source-value" title={source}>{source}</span>
       </div>
+
+      <a
+        className="topbar-cta"
+        href="https://playground.gitlawb.com/"
+        target="_blank"
+        rel="noreferrer"
+      >
+        Open playground
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <path d="M5 3h8v8" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M13 3 5 11" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </a>
     </header>
   );
 }
 
-function StatusCell({
-  sev,
-  total,
-  delta,
-  start,
+/* -------------------- hero -------------------- */
+
+function Hero({
+  profile,
+  onJumpToBuilder,
 }: {
-  sev: Severity;
-  total: number;
-  delta: number;
-  start: boolean;
+  profile: SourceProfile;
+  onJumpToBuilder: () => void;
 }) {
-  const animated = useCountUp(total, 1500, start);
-  const sparkPoints = useMemo(() => sparklineFor(sev, total), [sev, total]);
   return (
-    <div
-      className="status-cell"
-      role="status"
-      aria-label={`${SEVERITY_LABEL[sev]} ${total}`}
-      style={{ ["--cell-color" as string]: SEVERITY_COLOR[sev] } as CSSProperties}
-    >
-      <div className="status-cell-row">
-        <div className="status-cell-value">{animated}</div>
-        <Sparkline points={sparkPoints} color={SEVERITY_COLOR[sev]} />
-      </div>
-      <div className={`status-cell-label ${sev}`}>{SEVERITY_LABEL[sev]}</div>
-      <div className={`status-cell-delta ${delta >= 0 ? "" : "negative"}`}>
-        <span className="delta-arrow">{delta >= 0 ? "▲" : "▼"}</span>
-        <span>{(delta >= 0 ? "+" : "") + delta} today</span>
-      </div>
-    </div>
-  );
-}
-
-/* Deterministic sparkline values per severity, ending at `endValue` */
-function sparklineFor(sev: Severity, endValue: number): number[] {
-  // 12-point pseudo-random walk seeded by severity index
-  const seedBase = SEVERITY_ORDER.indexOf(sev) * 137 + 41;
-  let s = seedBase;
-  const rand = () => {
-    s = (s * 9301 + 49297) % 233280;
-    return s / 233280;
-  };
-  const out: number[] = [];
-  const len = 12;
-  let v = Math.max(0, endValue - 3 + Math.floor(rand() * 4));
-  for (let i = 0; i < len - 1; i++) {
-    out.push(v);
-    const step = (rand() - 0.4) * 1.6;
-    v = Math.max(0, v + step);
-  }
-  out.push(endValue);
-  return out;
-}
-
-function Sparkline({ points, color }: { points: number[]; color: string }) {
-  const max = Math.max(1, ...points);
-  const W = 64;
-  const H = 22;
-  const step = W / (points.length - 1);
-  const path = points
-    .map((p, i) => {
-      const x = i * step;
-      const y = H - (p / max) * (H - 2) - 1;
-      return `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(" ");
-  const last = points[points.length - 1];
-  const lx = W;
-  const ly = H - (last / max) * (H - 2) - 1;
-  return (
-    <svg
-      className="sparkline"
-      viewBox={`0 0 ${W + 4} ${H}`}
-      preserveAspectRatio="none"
-      aria-hidden="true"
-    >
-      <path d={path} stroke={color} strokeWidth="1.4" fill="none" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={lx} cy={ly} r="1.6" fill={color}>
-        <animate attributeName="r" values="1.6;2.6;1.6" dur="1.8s" repeatCount="indefinite" />
-      </circle>
-    </svg>
-  );
-}
-
-/* ============================================================
-   PIPELINE (2A) + HEALING CARDS (2B)
-   ============================================================ */
-
-function HealingPipeline({
-  errors,
-  filter,
-  onStageClick,
-  onClearFilter,
-  filteredErrors,
-  onAgentClick,
-  ready,
-}: {
-  errors: ErrorRow[];
-  filter: ActiveFilter;
-  onStageClick: (sev: Severity) => void;
-  onClearFilter: () => void;
-  filteredErrors: ErrorRow[];
-  onAgentClick: (agentName: string) => void;
-  ready: boolean;
-}) {
-  const stageCounts = useMemo(() => {
-    const c: Record<Severity, number> = { critical: 0, diagnosed: 0, regenerating: 0, healed: 0 };
-    for (const e of errors) c[e.severity] += 1;
-    return c;
-  }, [errors]);
-
-  const isStageSelected = (sev: Severity) =>
-    filter?.type === "stage" && filter.value === sev;
-
-  return (
-    <section className="section" aria-labelledby="pipeline-title">
-      <div className="section-head">
-        <h2 className="section-title" id="pipeline-title">Healing Pipeline</h2>
-        {filter && (
-          <span className="filter-chip" role="status">
-            Viewing:{" "}
-            {filter.type === "stage"
-              ? SEVERITY_LABEL[filter.value]
-              : `${filter.value}'s repairs`}
-            <button onClick={onClearFilter} aria-label="Clear filter">✕</button>
-          </span>
-        )}
-      </div>
-
-      <div className="pipeline">
-        <div className="pipeline-stages" role="tablist" aria-label="Filter by pipeline stage">
-          {SEVERITY_ORDER.map((sev) => {
-            const count = stageCounts[sev];
-            const selected = isStageSelected(sev);
-            const isActive = sev !== "healed" && count > 0;
-            const isComplete = sev === "healed";
-            const style = { ["--stage-color"]: SEVERITY_COLOR[sev] } as CSSProperties;
-            return (
-              <button
-                key={sev}
-                role="tab"
-                aria-selected={selected}
-                aria-label={`Filter by ${SEVERITY_LABEL[sev]}`}
-                className={`pipeline-stage ${isActive ? "active" : ""} ${selected ? "selected" : ""}`}
-                style={style}
-                onClick={() => onStageClick(sev)}
-              >
-                <div className="pipeline-stage-label">{SEVERITY_LABEL[sev]}</div>
-                <div className="pipeline-stage-count">{count}</div>
-                <div
-                  className={`pipeline-stage-caption ${
-                    isComplete ? "is-complete" : isActive ? "is-active" : ""
-                  }`}
-                >
-                  {isComplete ? "complete" : isActive ? "pulsing" : "idle"}
-                </div>
-              </button>
-            );
-          })}
+    <section className="hero" id="top" aria-labelledby="hero-title">
+      <div className="hero-copy">
+        <p className="eyebrow">GitLawB hosted app builder</p>
+        <h1 id="hero-title">
+          Import a repository or a live website. Ship a calm, premium app — not another template.
+        </h1>
+        <p className="hero-lede">
+          GitAxolotl is a small command room for the GitLawB playground. Point it at a GitHub repo
+          or a real URL, watch the brief, build, and quality gates resolve, then publish when it
+          looks like something a human would defend.
+        </p>
+        <div className="hero-actions">
+          <button type="button" className="primary-action" onClick={onJumpToBuilder}>
+            Configure source
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path d="M3 8h10" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M9 4l4 4-4 4" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <a className="secondary-action" href="#quality">
+            See quality gates
+          </a>
         </div>
-
-        <div className="pipeline-connectors" aria-hidden="true">
-          <svg viewBox="0 0 400 24" preserveAspectRatio="none">
-            <defs>
-              <marker id="arrow-head" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto">
-                <path d="M0 0 L8 4 L0 8 Z" fill="var(--gitlawb-cyan)" opacity="0.85" />
-              </marker>
-            </defs>
-            <line className="connector-line" x1="0"   y1="12" x2="100" y2="12" markerEnd="url(#arrow-head)" />
-            <line className="connector-line" x1="133" y1="12" x2="233" y2="12" markerEnd="url(#arrow-head)" />
-            <line className="connector-line" x1="266" y1="12" x2="396" y2="12" markerEnd="url(#arrow-head)" />
-            <circle className="connector-dot" cy="12" r="2.2" style={{ animationDelay: "0s" } as CSSProperties} />
-            <circle className="connector-dot" cy="12" r="2.2" style={{ animationDelay: "1s" } as CSSProperties} />
-            <circle className="connector-dot" cy="12" r="2.2" style={{ animationDelay: "2s" } as CSSProperties} />
-          </svg>
-        </div>
-
-        <div className="healing-cards" role="list" aria-label="Healing cards">
-          {!ready
-            ? Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="skeleton card" aria-hidden="true" />
-              ))
-            : filteredErrors.length === 0
-            ? (
-              <div className="empty-state">
-                No errors match this filter — try clearing the filter to see all 18 items.
-              </div>
-            )
-            : filteredErrors.map((e) => (
-                <HealingCard key={e.id} error={e} onAgentClick={onAgentClick} />
-              ))}
-        </div>
+        <dl className="hero-meta">
+          <div>
+            <dt>Routes detected</dt>
+            <dd>{profile.routes}</dd>
+          </div>
+          <div>
+            <dt>Files indexed</dt>
+            <dd>{profile.files}</dd>
+          </div>
+          <div>
+            <dt>Primary stack</dt>
+            <dd>{profile.language}</dd>
+          </div>
+        </dl>
       </div>
+
+      <aside className="hero-panel" aria-label="Build readiness snapshot">
+        <div className="hero-panel-head">
+          <div>
+            <p className="eyebrow muted">Build readiness</p>
+            <h2>Calm by construction</h2>
+          </div>
+          <span className="badge">no blocking issues</span>
+        </div>
+        <div className="hero-stats">
+          <article>
+            <span>Readiness</span>
+            <strong>97%</strong>
+            <small>Sign-in &amp; publish wired</small>
+          </article>
+          <article>
+            <span>Bundle</span>
+            <strong>68 KB</strong>
+            <small>Gzipped shell</small>
+          </article>
+          <article>
+            <span>Gates</span>
+            <strong>4 / 4</strong>
+            <small>Owners assigned</small>
+          </article>
+          <article>
+            <span>First paint</span>
+            <strong>0.8s</strong>
+            <small>Target on 4G mobile</small>
+          </article>
+        </div>
+      </aside>
     </section>
   );
 }
 
-function HealingCard({
-  error,
-  onAgentClick,
-}: {
-  error: ErrorRow;
-  onAgentClick: (agent: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const style = { ["--card-color"]: SEVERITY_COLOR[error.severity], ["--progress"]: `${error.progress}%` } as CSSProperties;
+/* -------------------- builder -------------------- */
 
-  const timeline = useMemo(() => buildTimeline(error), [error]);
+function Builder({
+  kind,
+  setKind,
+  value,
+  setValue,
+  resolved,
+  profile,
+  onSubmit,
+  inputRef,
+}: {
+  kind: SourceKind;
+  setKind: (k: SourceKind) => void;
+  value: string;
+  setValue: (v: string) => void;
+  resolved: string;
+  profile: SourceProfile;
+  onSubmit: () => void;
+  inputRef: RefObject<HTMLInputElement | null>;
+}) {
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    onSubmit();
+  };
 
   return (
-    <div
-      className="healing-card"
-      style={style}
-      role="listitem"
-      tabIndex={0}
-      onClick={() => setExpanded((v) => !v)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          setExpanded((v) => !v);
-        }
-      }}
-      aria-expanded={expanded}
-    >
-      <div className="healing-card-top">
-        <span className="severity-pill">{SEVERITY_LABEL[error.severity]}</span>
-        <span className="healing-card-title">{error.title}</span>
-      </div>
-      <div className="healing-card-meta">
-        <span className="meta-file">
-          <span className="icon" aria-hidden="true">📁</span>
-          {error.file}
-        </span>
-        <span>
-          <span aria-hidden="true">👤 Assigned: </span>
-          <button
-            className="meta-agent"
-            onClick={(ev) => {
-              ev.stopPropagation();
-              onAgentClick(error.agent);
-            }}
-            aria-label={`Jump to agent ${error.agent}`}
-          >
-            {error.agent}
-          </button>
-        </span>
-        <span aria-label={`Updated ${error.time}`}>
-          <span aria-hidden="true">⏱ </span>
-          {error.time}
-        </span>
-      </div>
-      <div className="progress-row">
-        <div className="progress-bar" aria-hidden="true">
-          <div
-            className={`progress-fill ${error.progress >= 100 ? "complete" : ""}`}
-          />
-        </div>
-        <div className="progress-label">
-          {error.progress}% ({error.action})
-        </div>
+    <section className="builder" id="builder" aria-labelledby="builder-title">
+      <div className="section-heading">
+        <p className="eyebrow">Source intake</p>
+        <h2 id="builder-title">
+          One input. Two intents. Repository, or a live website you want recreated as an app.
+        </h2>
       </div>
 
-      {expanded && (
-        <div className="healing-card-expand">
-          <div className="expand-description">{error.description}</div>
-          <ul className="expand-timeline">
-            {timeline.map((step, i) => (
-              <li key={i}>
-                <span className="ts">{step.time}</span>
-                <span>{step.action}</span>
+      <div className="builder-layout">
+        <form className="builder-form" onSubmit={handleSubmit}>
+          <div className="mode-switch" role="tablist" aria-label="Choose source type">
+            {(["repo", "site"] as SourceKind[]).map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="tab"
+                aria-selected={kind === option}
+                className={classNames("mode-button", kind === option && "active")}
+                onClick={() => {
+                  setKind(option);
+                  setValue(SOURCE_EXAMPLES[option][0]);
+                  inputRef.current?.focus();
+                }}
+              >
+                {option === "repo" ? "GitHub repository" : "Live website"}
+              </button>
+            ))}
+          </div>
+
+          <label className="source-field">
+            <span>{kind === "repo" ? "Repository" : "Website URL"}</span>
+            <input
+              ref={inputRef}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              placeholder={kind === "repo" ? "owner/repo or GitHub URL" : "https://your-site.com"}
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              inputMode="url"
+            />
+          </label>
+
+          <ul className="example-row" aria-label="Example sources">
+            {SOURCE_EXAMPLES[kind].map((example) => (
+              <li key={example}>
+                <button type="button" onClick={() => setValue(example)}>
+                  {example}
+                </button>
               </li>
             ))}
           </ul>
-        </div>
-      )}
-    </div>
+
+          <div className="builder-actions">
+            <button type="submit" className="primary-action">
+              Generate brief
+            </button>
+            <span className="resolved" aria-live="polite">
+              Resolved as <strong>{resolved}</strong>
+            </span>
+          </div>
+        </form>
+
+        <article className="source-card" aria-label="Source preview">
+          <header>
+            <div>
+              <p className="eyebrow muted">{profile.subtitle}</p>
+              <h3>{profile.title}</h3>
+            </div>
+            <span className="badge subtle">{profile.language}</span>
+          </header>
+
+          <ul className="source-pages">
+            {profile.pages.map((page) => (
+              <li key={page}>
+                <span className="page-bullet" aria-hidden="true" />
+                <code>{page}</code>
+              </li>
+            ))}
+          </ul>
+
+          <footer>
+            <ul className="source-signals">
+              {profile.signals.map((signal) => (
+                <li key={signal}>{signal}</li>
+              ))}
+            </ul>
+          </footer>
+        </article>
+      </div>
+    </section>
   );
 }
 
-function buildTimeline(error: ErrorRow): { time: string; action: string }[] {
-  // Deterministic 3-5 step timeline derived from id+severity+progress
-  const base = new Date();
-  base.setSeconds(0, 0);
-  const offset = ((error.id * 7) % 60) + 5; // minutes ago
-  const t = (mins: number) => {
-    const d = new Date(base.getTime() - (offset - mins) * 60_000);
-    return formatHHMMSS(d).slice(0, 5);
-  };
-  const steps: { time: string; action: string }[] = [
-    { time: t(0),  action: "scan initiated" },
-    { time: t(4),  action: "vulnerability confirmed" },
-    { time: t(8),  action: "patch drafted" },
-  ];
-  if (error.progress >= 50) steps.push({ time: t(12), action: "tests running" });
-  if (error.progress >= 80) steps.push({ time: t(16), action: "deploy verified" });
-  if (error.progress >= 100) steps.push({ time: t(20), action: "marked healed" });
-  return steps;
+/* -------------------- pipeline -------------------- */
+
+function Pipeline() {
+  return (
+    <section className="section pipeline" id="pipeline" aria-labelledby="pipeline-title">
+      <div className="section-heading">
+        <p className="eyebrow">Pipeline</p>
+        <h2 id="pipeline-title">
+          Few steps. Clear owner per step. Nothing happens off-screen.
+        </h2>
+      </div>
+      <ol className="pipeline-grid" role="list">
+        {PIPELINE.map((step, index) => (
+          <li
+            key={step.id}
+            className={classNames("pipeline-card", step.status)}
+            aria-current={step.status === "active" ? "step" : undefined}
+          >
+            <div className="pipeline-card-head">
+              <span className="step-index">0{index + 1}</span>
+              <span className={classNames("pill", step.status)}>{stepStatusLabel(step.status)}</span>
+            </div>
+            <h3>{step.title}</h3>
+            <p>{step.detail}</p>
+            <footer>
+              <span>{step.duration}</span>
+              {step.status !== "queued" && (
+                <span className="meter" aria-hidden="true">
+                  <i style={{ width: step.status === "done" ? "100%" : "62%" }} />
+                </span>
+              )}
+            </footer>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
 }
 
-/* ============================================================
-   AGENT HEALTH GRID
-   ============================================================ */
+/* -------------------- quality gates -------------------- */
 
-function AgentHealthGrid({
-  agents,
-  filter,
-  highlightedAgent,
-  onAgentClick,
-  registerRef,
-  ready,
-}: {
-  agents: Agent[];
-  filter: ActiveFilter;
-  highlightedAgent: string | null;
-  onAgentClick: (id: string) => void;
-  registerRef: (id: string, el: HTMLDivElement | null) => void;
-  ready: boolean;
-}) {
+function Quality() {
+  const [activeId, setActiveId] = useState<string>(GATES[0].id);
+  const active = useMemo(() => GATES.find((gate) => gate.id === activeId) ?? GATES[0], [activeId]);
+
   return (
-    <section className="section" aria-labelledby="agents-title">
-      <div className="section-head">
-        <h2 className="section-title" id="agents-title">Agent Health</h2>
-        <span className="section-meta">{agents.length} Active</span>
+    <section className="section quality" id="quality" aria-labelledby="quality-title">
+      <div className="section-heading">
+        <p className="eyebrow">Quality control</p>
+        <h2 id="quality-title">
+          Every surface has a named owner and a visible reason to pass.
+        </h2>
+      </div>
+
+      <div className="quality-layout">
+        <ul className="gate-list" role="listbox" aria-label="Quality gates">
+          {GATES.map((gate) => {
+            const selected = gate.id === active.id;
+            return (
+              <li key={gate.id}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  className={classNames("gate-row", selected && "active", gate.state)}
+                  onClick={() => setActiveId(gate.id)}
+                >
+                  <span className={classNames("status-dot", gate.state)} aria-hidden="true" />
+                  <span className="gate-row-body">
+                    <strong>{gate.title}</strong>
+                    <small>
+                      {gate.owner} · {statusLabel(gate.state)}
+                    </small>
+                  </span>
+                  <span className="gate-score">{gate.score}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+
+        <article className="gate-detail" aria-live="polite">
+          <div
+            className={classNames("score-ring", active.state)}
+            style={{ "--score": `${active.score}%` } as CSSProperties}
+            aria-hidden="true"
+          >
+            <span>{active.score}</span>
+          </div>
+          <div className="gate-detail-body">
+            <p className="eyebrow muted">{active.owner}</p>
+            <h3>{active.title}</h3>
+            <p>{active.detail}</p>
+            <ul className="evidence" aria-label="Evidence">
+              {active.evidence.map((item) => (
+                <li key={item}>
+                  <span aria-hidden="true">✓</span>
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+/* -------------------- agents -------------------- */
+
+function Crew() {
+  return (
+    <section className="section crew" aria-labelledby="crew-title">
+      <div className="section-heading compact">
+        <p className="eyebrow">Builder crew</p>
+        <h2 id="crew-title">Agents with specific jobs. No vague magic.</h2>
       </div>
       <div className="agent-grid">
-        {!ready
-          ? Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="skeleton ring" aria-hidden="true" />
-            ))
-          : agents.map((a) => (
-              <AgentCard
-                key={a.id}
-                agent={a}
-                selected={filter?.type === "agent" && filter.value === a.id}
-                highlighted={highlightedAgent === a.id}
-                onClick={() => onAgentClick(a.id)}
-                registerRef={registerRef}
-              />
-            ))}
-      </div>
-    </section>
-  );
-}
-
-function AgentCard({
-  agent,
-  selected,
-  highlighted,
-  onClick,
-  registerRef,
-}: {
-  agent: Agent;
-  selected: boolean;
-  highlighted: boolean;
-  onClick: () => void;
-  registerRef: (id: string, el: HTMLDivElement | null) => void;
-}) {
-  const color = ringColor(agent.health);
-  const value = useCountUp(agent.health, 1500);
-
-  const r = 36;
-  const circumference = 2 * Math.PI * r;
-  const filled = (agent.health / 100) * circumference;
-  const offset = circumference - filled;
-
-  return (
-    <div
-      ref={(el) => registerRef(agent.id, el)}
-      className={`agent-card ${selected ? "selected" : ""} ${highlighted ? "highlight" : ""} ${agent.health < 60 ? "low" : ""}`}
-      style={{ ["--ring-color"]: color } as CSSProperties}
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick();
-        }
-      }}
-      aria-pressed={selected}
-      aria-label={`${agent.name} — ${agent.role}, health ${agent.health}%, ${agent.activeRepairs} active repairs, success rate ${agent.successRate}%`}
-    >
-      <div className={`agent-ring ${agent.health < 60 ? "low-health" : ""}`}>
-        <svg viewBox="0 0 96 96">
-          <circle className="ring-bg" cx="48" cy="48" r={r} strokeWidth="6" />
-          <circle
-            className="ring-fg"
-            cx="48"
-            cy="48"
-            r={r}
-            strokeWidth="6"
-            strokeDasharray={circumference}
-            strokeDashoffset={offset}
-          />
-        </svg>
-        <div className="agent-ring-value">{value}%</div>
-      </div>
-      <div className="agent-name">{agent.name}</div>
-      <div className="agent-role">{agent.role}</div>
-      <div className="agent-meta">
-        <div>{agent.activeRepairs} fixing</div>
-        <div className="ok">{agent.successRate.toFixed(1)}% OK</div>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================
-   REGENERATION LOG
-   ============================================================ */
-
-const MAX_LOG = 12;
-
-function RegenerationLog() {
-  const [entries, setEntries] = useState<LogEntry[]>(() =>
-    LOG_SEEDS.map((s, i) => ({
-      ...s,
-      id: i,
-      time: formatHHMMSS(new Date(Date.now() - (LOG_SEEDS.length - i) * 4000)),
-    }))
-  );
-  const nextId = useRef(LOG_SEEDS.length);
-  const cursorRef = useRef(0);
-  const listRef = useRef<HTMLUListElement | null>(null);
-
-  useEffect(() => {
-    const tick = () => {
-      const seed = LOG_SEEDS[cursorRef.current % LOG_SEEDS.length];
-      cursorRef.current += 1;
-      const entry: LogEntry = {
-        ...seed,
-        id: nextId.current++,
-        time: formatHHMMSS(new Date()),
-      };
-      setEntries((prev) => {
-        const next = [...prev, entry];
-        if (next.length > MAX_LOG) next.splice(0, next.length - MAX_LOG);
-        return next;
-      });
-      // auto-scroll to bottom
-      requestAnimationFrame(() => {
-        if (listRef.current) {
-          listRef.current.scrollTop = listRef.current.scrollHeight;
-        }
-      });
-    };
-    const id = setInterval(tick, 3500);
-    return () => clearInterval(id);
-  }, []);
-
-  return (
-    <section className="section" aria-labelledby="log-title">
-      <div className="log">
-        <div className="log-head">
-          <h2 className="section-title" id="log-title">Regeneration Log</h2>
-          <span className="live-dot section-meta" style={{ color: "var(--status-healed)" }}>streaming</span>
-        </div>
-        <ul className="log-list" ref={listRef} aria-live="polite">
-          {entries.map((e, i) => (
-            <li key={e.id} className="log-row">
-              <span className="log-ts">[{e.time}]</span>
-              <span className="log-agent">{padEnd(e.agent, 7)}</span>
-              <span>
-                <span className="log-arrow">→ </span>
-                <span className={`log-action ${e.color}`}>{padEnd(e.action, 18)}</span>
-                <span className="log-arrow">→ </span>
-                <span className="log-target">{e.target}</span>
-                {i === entries.length - 1 && <span className="log-cursor" aria-hidden="true" />}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </section>
-  );
-}
-
-/* ============================================================
-   AXOLOTL AVATAR
-   ============================================================ */
-
-/* Wandering axolotl: random-walk around the viewport, tilt with velocity,
-   click → quick dart toward the cursor + wiggle. */
-function WanderingAxolotl() {
-  const containerRef = useRef<HTMLButtonElement>(null);
-  const trailRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef({
-    x: 200, y: 220,
-    vx: 0.4, vy: 0.1,
-    tx: 400, ty: 320,
-    speedBoost: 0,
-    facing: 1 as 1 | -1,
-    angle: 0,
-  });
-  const lastBubbleRef = useRef(0);
-  const bubbleIdRef = useRef(0);
-  const [bubbles, setBubbles] = useState<{ id: number; x: number; y: number }[]>([]);
-
-  useEffect(() => {
-    let raf = 0;
-
-    // Follow cursor — axolotl only moves when mouse moves
-    let mouseX = window.innerWidth / 2;
-    let mouseY = window.innerHeight / 2;
-    let isMouseMoving = false;
-    let mouseTimeout = 0;
-
-    const onMouseMove = (e: MouseEvent) => {
-      mouseX = e.clientX;
-      mouseY = e.clientY + 30; // offset below cursor
-      isMouseMoving = true;
-      clearTimeout(mouseTimeout);
-      mouseTimeout = window.setTimeout(() => { isMouseMoving = false; }, 200);
-    };
-    window.addEventListener("mousemove", onMouseMove, { passive: true });
-
-    // Initial target = center
-    const s0 = stateRef.current;
-    s0.tx = mouseX;
-    s0.ty = mouseY;
-
-    const tick = (t: number) => {
-      const s = stateRef.current;
-      const dx = s.tx - s.x;
-      const dy = s.ty - s.y;
-      const dist = Math.hypot(dx, dy);
-
-      // Update target from cursor position
-      s.tx = mouseX;
-      s.ty = mouseY;
-
-      // When mouse stops, slow down and stop
-      if (!isMouseMoving && dist < 5) {
-        s.vx *= 0.85;
-        s.vy *= 0.85;
-        raf = requestAnimationFrame(tick);
-        return;
-      }
-
-      // steer with gentle acceleration
-      const steer = 0.05 + s.speedBoost * 0.15;
-      s.vx += (dx / Math.max(dist, 0.001)) * steer;
-      s.vy += (dy / Math.max(dist, 0.001)) * steer;
-
-      // organic wiggle
-      s.vx += (Math.random() - 0.5) * 0.05;
-      s.vy += (Math.random() - 0.5) * 0.04;
-
-      // damping
-      s.vx *= 0.92;
-      s.vy *= 0.92;
-
-      // speed cap
-      const sp = Math.hypot(s.vx, s.vy);
-      const cap = 3.4 + s.speedBoost * 5;
-      if (sp > cap) {
-        s.vx = (s.vx / sp) * cap;
-        s.vy = (s.vy / sp) * cap;
-      }
-
-      s.x += s.vx;
-      s.y += s.vy;
-      s.speedBoost = Math.max(0, s.speedBoost - 0.02);
-
-      // facing flip based on horizontal velocity
-      if (Math.abs(s.vx) > 0.2) s.facing = s.vx >= 0 ? 1 : -1;
-      s.angle = Math.atan2(s.vy, Math.abs(s.vx) + 0.001) * (180 / Math.PI) * 0.45;
-
-      const el = containerRef.current;
-      if (el) {
-        el.style.transform =
-          `translate3d(${s.x}px, ${s.y}px, 0) ` +
-          `scaleX(${s.facing}) ` +
-          `rotate(${s.angle * s.facing}deg)`;
-      }
-
-      // emit bubble every ~140ms while moving
-      if (sp > 0.6 && t - lastBubbleRef.current > 140) {
-        lastBubbleRef.current = t;
-        const id = bubbleIdRef.current++;
-        // bubble origin: tail-side of the axolotl (depends on facing)
-        const tailOffsetX = s.facing === 1 ? -28 : 28;
-        const bx = s.x + tailOffsetX + (Math.random() - 0.5) * 8;
-        const by = s.y + 6 + (Math.random() - 0.5) * 8;
-        setBubbles((prev) => {
-          const next = [...prev, { id, x: bx, y: by }];
-          // cap
-          if (next.length > 24) next.splice(0, next.length - 24);
-          return next;
-        });
-        window.setTimeout(() => {
-          setBubbles((prev) => prev.filter((b) => b.id !== id));
-        }, 1600);
-      }
-
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("mousemove", onMouseMove);
-    };
-  }, []);
-
-  const dartTo = (clientX: number, clientY: number) => {
-    const s = stateRef.current;
-    s.tx = clientX;
-    s.ty = clientY;
-    s.speedBoost = 1;
-  };
-
-  return (
-    <>
-      <div ref={trailRef} className="axo-trail" aria-hidden="true">
-        {bubbles.map((b) => (
-          <span
-            key={b.id}
-            className="axo-bubble"
-            style={{ left: b.x, top: b.y } as CSSProperties}
-          />
+        {AGENTS.map((agent) => (
+          <article key={agent.name} className="agent-card">
+            <div
+              className="agent-load"
+              style={{ "--load": `${agent.load}%` } as CSSProperties}
+              aria-hidden="true"
+            >
+              <span>{agent.load}</span>
+            </div>
+            <header>
+              <h3>{agent.name}</h3>
+              <p>{agent.role}</p>
+            </header>
+            <footer>{agent.focus}</footer>
+          </article>
         ))}
       </div>
-      <button
-        ref={containerRef}
-        className="wandering-axolotl"
-        aria-label="GitAxolotl mascot — follows your cursor"
-        onClick={(e) => dartTo(e.clientX, e.clientY)}
-      >
-        <AxolotlSVG />
-      </button>
-    </>
+    </section>
   );
 }
 
-/* ============================================================
-   APP
-   ============================================================ */
+/* -------------------- audit log -------------------- */
+
+function Audit() {
+  return (
+    <section className="section audit" aria-labelledby="audit-title">
+      <div className="section-heading compact">
+        <p className="eyebrow">Activity</p>
+        <h2 id="audit-title">A short, honest log. No emoji rain, no fake streaming.</h2>
+      </div>
+      <ul className="audit-list">
+        {AUDIT.map((row) => (
+          <li key={row.time}>
+            <span className="audit-time">{row.time}</span>
+            <span className="audit-source">{row.source}</span>
+            <span className="audit-message">{row.message}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/* -------------------- handoff -------------------- */
+
+function Handoff() {
+  return (
+    <section className="section handoff" id="handoff" aria-labelledby="handoff-title">
+      <div>
+        <p className="eyebrow">Handoff</p>
+        <h2 id="handoff-title">
+          Same shell, two destinations: GitHub for review, playground for publish.
+        </h2>
+        <p>
+          The repository stays clean — Vite, React, TypeScript, no extra runtime deps. Once you sign
+          into the playground with X, the same app can be lifted there without rewriting.
+        </p>
+        <div className="handoff-actions">
+          <a className="primary-action" href="https://playground.gitlawb.com/" target="_blank" rel="noreferrer">
+            Open hosted playground
+          </a>
+          <a
+            className="secondary-action"
+            href="https://github.com/GitAxolotl/gitaxolotl"
+            target="_blank"
+            rel="noreferrer"
+          >
+            View on GitHub
+          </a>
+        </div>
+      </div>
+      <ul className="checklist" aria-label="Handoff checklist">
+        <li>
+          <strong>Repository</strong>
+          <span>Vite + React + TypeScript, no runtime deps beyond React.</span>
+        </li>
+        <li>
+          <strong>Design</strong>
+          <span>Restrained palette, one type scale, accessible focus rings.</span>
+        </li>
+        <li>
+          <strong>Quality</strong>
+          <span>Lint, build, contrast, and responsive checks before publish.</span>
+        </li>
+        <li>
+          <strong>Playground</strong>
+          <span>Single-file shell so it ports cleanly to the hosted runtime.</span>
+        </li>
+      </ul>
+    </section>
+  );
+}
+
+/* -------------------- root -------------------- */
 
 export default function App() {
-  const [filter, setFilter] = useState<ActiveFilter>(null);
-  const [highlight, setHighlight] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
+  const [kind, setKind] = useState<SourceKind>("repo");
+  const [value, setValue] = useState<string>(SOURCE_EXAMPLES.repo[0]);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const agentRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const registerRef = useCallback((id: string, el: HTMLDivElement | null) => {
-    agentRefs.current[id] = el;
-  }, []);
+  const resolved = useMemo(() => normalizeSource(kind, value), [kind, value]);
+  const profile = kind === "repo" ? REPO_PROFILE : SITE_PROFILE;
+
+  const jumpToBuilder = () => {
+    const node = document.getElementById("builder");
+    if (node) node.scrollIntoView({ behavior: "smooth", block: "start" });
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
 
   useEffect(() => {
-    const id = setTimeout(() => setReady(true), 900);
-    return () => clearTimeout(id);
-  }, []);
-
-  // counts respect active filter (so StatusBar reflects filtered state per brief)
-  const visibleErrors = useMemo(() => {
-    if (!filter) return MOCK_ERRORS;
-    if (filter.type === "stage") return MOCK_ERRORS.filter((e) => e.severity === filter.value);
-    const agentName = MOCK_AGENTS.find((a) => a.id === filter.value)?.name;
-    return MOCK_ERRORS.filter((e) => e.agent === agentName);
-  }, [filter]);
-
-  const counts = useMemo<Record<Severity, number>>(() => {
-    const c: Record<Severity, number> = { critical: 0, diagnosed: 0, regenerating: 0, healed: 0 };
-    for (const e of visibleErrors) c[e.severity] += 1;
-    return c;
-  }, [visibleErrors]);
-
-  const onStageClick = useCallback((sev: Severity) => {
-    setFilter((prev) =>
-      prev?.type === "stage" && prev.value === sev ? null : { type: "stage", value: sev }
-    );
-  }, []);
-
-  const onAgentCardClick = useCallback((id: string) => {
-    setFilter((prev) =>
-      prev?.type === "agent" && prev.value === id ? null : { type: "agent", value: id }
-    );
-  }, []);
-
-  // Jump from a healing card's agent label to the agent grid card
-  const onAgentNameClick = useCallback((agentName: string) => {
-    const agent = MOCK_AGENTS.find((a) => a.name === agentName);
-    if (!agent) return;
-    const el = agentRefs.current[agent.id];
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      setHighlight(agent.id);
-      window.setTimeout(() => setHighlight(null), 3000);
-    }
-  }, []);
-
-  const onClearFilter = useCallback(() => setFilter(null), []);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const onKey = (ev: KeyboardEvent) => {
-      const tag = (ev.target as HTMLElement | null)?.tagName?.toLowerCase();
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea") return;
-      switch (ev.key) {
-        case "1": setFilter({ type: "stage", value: "critical" }); break;
-        case "2": setFilter({ type: "stage", value: "diagnosed" }); break;
-        case "3": setFilter({ type: "stage", value: "regenerating" }); break;
-        case "4": setFilter({ type: "stage", value: "healed" }); break;
-        case "0": setFilter(null); break;
-        default: return;
+      if (event.key === "/") {
+        event.preventDefault();
+        jumpToBuilder();
       }
-      ev.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   return (
-    <div className="app">
-      <div className="scanline" aria-hidden="true" />
-      <StatusBar counts={counts} ready={ready} />
+    <div className="app-shell">
+      <Topbar kind={kind} source={resolved} />
       <main>
-        <HealingPipeline
-          errors={MOCK_ERRORS}
-          filter={filter}
-          onStageClick={onStageClick}
-          onClearFilter={onClearFilter}
-          filteredErrors={visibleErrors}
-          onAgentClick={onAgentNameClick}
-          ready={ready}
+        <Hero profile={profile} onJumpToBuilder={jumpToBuilder} />
+        <Builder
+          kind={kind}
+          setKind={setKind}
+          value={value}
+          setValue={setValue}
+          resolved={resolved}
+          profile={profile}
+          onSubmit={jumpToBuilder}
+          inputRef={inputRef}
         />
-        <AgentHealthGrid
-          agents={MOCK_AGENTS}
-          filter={filter}
-          highlightedAgent={highlight}
-          onAgentClick={onAgentCardClick}
-          registerRef={registerRef}
-          ready={ready}
-        />
-        <RegenerationLog />
-        <p className="sr-only">
-          Keyboard shortcuts: 1 Critical, 2 Diagnosed, 3 Regenerating, 4 Healed, 0 clears filters.
-        </p>
+        <Pipeline />
+        <Quality />
+        <Crew />
+        <Audit />
+        <Handoff />
+        <footer className="page-footer">
+          <span>GitAxolotl · part of the GitLawB network.</span>
+          <span className="kbd-hint">
+            Press <kbd>/</kbd> to focus the source field
+          </span>
+        </footer>
       </main>
-      <CursorGlow />
-      <ParticleField />
-      <WanderingAxolotl />
     </div>
   );
 }
+
