@@ -421,13 +421,12 @@ function Builder({
 
       <div className="builder-layout">
         <form className="builder-form" onSubmit={handleSubmit}>
-          <div className="mode-switch" role="tablist" aria-label="Choose source type">
+          <div className="mode-switch" role="group" aria-label="Choose source type">
             {(["repo", "site"] as SourceKind[]).map((option) => (
               <button
                 key={option}
                 type="button"
-                role="tab"
-                aria-selected={kind === option}
+                aria-pressed={kind === option}
                 className={classNames("mode-button", kind === option && "active")}
                 onClick={() => {
                   setKind(option);
@@ -560,15 +559,15 @@ function Quality() {
       </div>
 
       <div className="quality-layout">
-        <ul className="gate-list" role="listbox" aria-label="Quality gates">
+        <ul className="gate-list" aria-label="Quality gates">
           {GATES.map((gate) => {
             const selected = gate.id === active.id;
             return (
               <li key={gate.id}>
                 <button
                   type="button"
-                  role="option"
-                  aria-selected={selected}
+                  aria-pressed={selected}
+                  aria-controls="gate-detail"
                   className={classNames("gate-row", selected && "active", gate.state)}
                   onClick={() => setActiveId(gate.id)}
                 >
@@ -586,7 +585,7 @@ function Quality() {
           })}
         </ul>
 
-        <article className="gate-detail" aria-live="polite">
+        <article className="gate-detail" id="gate-detail" aria-live="polite">
           <div
             className={classNames("score-ring", active.state)}
             style={{ "--score": `${active.score}%` } as CSSProperties}
@@ -728,7 +727,15 @@ export default function App() {
 
   const jumpToBuilder = () => {
     const node = document.getElementById("builder");
-    if (node) node.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (node) {
+      const prefersReducedMotion =
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      node.scrollIntoView({
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+        block: "start",
+      });
+    }
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
