@@ -15,24 +15,24 @@
   --text-muted: #4a5568;
 
   /* Brand */
-  --axolotl-pink: #ff6b9d;
-  --axolotl-pink-glow: rgba(255, 107, 157, 0.15);
-  --gitlawb-cyan: #00d4ff;
-  --gitlawb-cyan-glow: rgba(0, 212, 255, 0.15);
+  --axolotl-pink: #ffffff;
+  --axolotl-pink-glow: rgba(255, 255, 255, 0.08);
+  --gitlawb-cyan: #ffffff;
+  --gitlawb-cyan-glow: rgba(255, 255, 255, 0.08);
 
   /* Status — Healing Pipeline */
-  --status-critical: #ef4444;
-  --status-diagnosed: #f59e0b;
-  --status-regenerating: #a78bfa;
-  --status-healed: #10b981;
+  --status-critical: #888;
+  --status-diagnosed: #666;
+  --status-regenerating: #999;
+  --status-healed: #ccc;
 
   /* Glows */
-  --glow-pink: 0 0 20px rgba(255, 107, 157, 0.2);
-  --glow-cyan: 0 0 20px rgba(0, 212, 255, 0.2);
-  --glow-green: 0 0 20px rgba(16, 185, 129, 0.2);
-  --glow-red: 0 0 20px rgba(239, 68, 68, 0.25);
-  --glow-amber: 0 0 20px rgba(245, 158, 11, 0.25);
-  --glow-violet: 0 0 20px rgba(167, 139, 250, 0.25);
+  --glow-pink: 0 0 20px rgba(255, 255, 255, 0.06);
+  --glow-cyan: 0 0 20px rgba(255, 255, 255, 0.06);
+  --glow-green: 0 0 20px rgba(255, 255, 255, 0.06);
+  --glow-red: 0 0 20px rgba(255, 255, 255, 0.06);
+  --glow-amber: 0 0 20px rgba(255, 255, 255, 0.06);
+  --glow-violet: 0 0 20px rgba(255, 255, 255, 0.06);
 
   /* Fonts */
   --font-sans: "Inter", "SF Pro Display", "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -104,7 +104,7 @@ ul { margin: 0; padding: 0; list-style: none; }
   z-index: 2;
   background:
     radial-gradient(120% 80% at 50% 50%, transparent 55%, rgba(0,0,0,0.45) 100%),
-    radial-gradient(60% 40% at 50% 0%, color-mix(in srgb, var(--axolotl-pink) 10%, transparent), transparent 60%);
+    radial-gradient(60% 40% at 50% 0%, rgba(255,255,255,0.02), transparent 60%);
 }
 
 main {
@@ -1040,7 +1040,7 @@ main {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #ffe1ec, var(--axolotl-pink) 70%, transparent 100%);
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.15), rgba(255,255,255,0.05) 70%, transparent 100%);
   box-shadow: 0 0 8px rgba(255, 107, 157, 0.65);
   transform: translate(-50%, -50%);
   animation: axo-bubble-rise 1.6s ease-out forwards;

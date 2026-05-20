@@ -165,83 +165,69 @@ function ringColor(health: number): string {
 /* -------------------- icons -------------------- */
 
 function AxolotlSVG() {
-  // Side-view axolotl, facing right (+x). Wandering component flips horizontally
-  // when swimming left. Tail + gills + dorsal fin have CSS-driven keyframe motion.
+  // Line-art axolotl — stroke only, no fill. Monochrome.
   return (
-    <svg viewBox="-14 -2 124 70" aria-hidden="true">
-      <defs>
-        <radialGradient id="axo-body" cx="45%" cy="40%" r="62%">
-          <stop offset="0%"  stopColor="#ffe9f1" />
-          <stop offset="55%" stopColor="var(--axolotl-pink)" />
-          <stop offset="100%" stopColor="#a8336a" />
-        </radialGradient>
-        <linearGradient id="axo-fin" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0%"  stopColor="#ffe1ec" stopOpacity="0.85" />
-          <stop offset="100%" stopColor="var(--axolotl-pink)" stopOpacity="0.5" />
-        </linearGradient>
-        <radialGradient id="axo-gill" cx="50%" cy="50%" r="60%">
-          <stop offset="0%"  stopColor="#ffd2e1" />
-          <stop offset="100%" stopColor="var(--axolotl-pink)" />
-        </radialGradient>
-      </defs>
-
-      {/* dorsal fin (top, undulating) */}
-      <path className="axo-fin-top" d="M22 18 Q40 4 62 18 L62 22 Q40 12 22 22 Z" fill="url(#axo-fin)" stroke="#ffb7d1" strokeWidth="0.4" strokeOpacity="0.6" />
-
-      {/* tail (swishes) */}
+    <svg viewBox="-40 -50 160 120" aria-hidden="true" fill="none" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" opacity="0.35">
+      {/* Body */}
+      <ellipse cx="0" cy="4" rx="14" ry="20" />
+      {/* Head — wide, flat */}
+      <ellipse cx="0" cy="-22" rx="20" ry="14" />
+      {/* Left gills (3, with frills) */}
+      <path d="M-18,-28 C-28,-42 -40,-34 -32,-22" />
+      <path d="M-24,-38 L-28,-35" strokeWidth="0.6" />
+      <path d="M-30,-32 L-34,-29" strokeWidth="0.6" />
+      <path d="M-33,-27 L-36,-24" strokeWidth="0.6" />
+      <path d="M-19,-24 C-30,-30 -38,-22 -30,-14" />
+      <path d="M-26,-28 L-30,-25" strokeWidth="0.6" />
+      <path d="M-32,-21 L-35,-18" strokeWidth="0.6" />
+      <path d="M-18,-20 C-26,-22 -30,-16 -24,-10" />
+      <path d="M-24,-19 L-27,-16" strokeWidth="0.6" />
+      {/* Right gills (3, with frills) */}
+      <path d="M18,-28 C28,-42 40,-34 32,-22" />
+      <path d="M24,-38 L28,-35" strokeWidth="0.6" />
+      <path d="M30,-32 L34,-29" strokeWidth="0.6" />
+      <path d="M33,-27 L36,-24" strokeWidth="0.6" />
+      <path d="M19,-24 C30,-30 38,-22 30,-14" />
+      <path d="M26,-28 L30,-25" strokeWidth="0.6" />
+      <path d="M32,-21 L35,-18" strokeWidth="0.6" />
+      <path d="M18,-20 C26,-22 30,-16 24,-10" />
+      <path d="M24,-19 L27,-16" strokeWidth="0.6" />
+      {/* Eyes */}
+      <circle cx="-8" cy="-24" r="2.5" strokeWidth="0.8" />
+      <circle cx="8" cy="-24" r="2.5" strokeWidth="0.8" />
+      {/* Smile */}
+      <path d="M-12,-16 Q0,-11 12,-16" strokeWidth="0.8" />
+      {/* Arms (4 fingers) */}
+      <path d="M-13,0 Q-18,4 -22,6" />
+      <path d="M-22,6 L-27,2" strokeWidth="0.6" />
+      <path d="M-22,6 L-28,6" strokeWidth="0.6" />
+      <path d="M-22,6 L-27,10" strokeWidth="0.6" />
+      <path d="M-22,6 L-24,12" strokeWidth="0.6" />
+      <path d="M13,0 Q18,4 22,6" />
+      <path d="M22,6 L27,2" strokeWidth="0.6" />
+      <path d="M22,6 L28,6" strokeWidth="0.6" />
+      <path d="M22,6 L27,10" strokeWidth="0.6" />
+      <path d="M22,6 L24,12" strokeWidth="0.6" />
+      {/* Legs (4 fingers) */}
+      <path d="M-9,16 Q-13,22 -16,25" />
+      <path d="M-16,25 L-21,22" strokeWidth="0.6" />
+      <path d="M-16,25 L-22,25" strokeWidth="0.6" />
+      <path d="M-16,25 L-21,28" strokeWidth="0.6" />
+      <path d="M-16,25 L-18,30" strokeWidth="0.6" />
+      <path d="M9,16 Q13,22 16,25" />
+      <path d="M16,25 L21,22" strokeWidth="0.6" />
+      <path d="M16,25 L22,25" strokeWidth="0.6" />
+      <path d="M16,25 L21,28" strokeWidth="0.6" />
+      <path d="M16,25 L18,30" strokeWidth="0.6" />
+      {/* Tail */}
       <g className="axo-tail">
-        <path d="M80 32 Q100 18 108 32 Q100 46 80 32 Z" fill="url(#axo-body)" />
-        <path d="M82 32 Q96 28 104 32" stroke="#a8336a" strokeWidth="0.5" fill="none" opacity="0.5" />
-        <path d="M82 32 Q96 36 104 32" stroke="#a8336a" strokeWidth="0.5" fill="none" opacity="0.3" />
+        <path d="M0,20 Q0,34 0,52" />
+        {/* Dorsal fin */}
+        <path d="M-1,22 L-2,26 L2,30 L-1,34 L2,38" strokeWidth="0.6" />
+        {/* Tail fin */}
+        <path d="M-8,48 Q0,56 8,48" strokeWidth="0.6" />
+        <path d="M-5,50 Q0,54 5,50" strokeWidth="0.5" />
       </g>
-
-      {/* gill stalks on the head side — feathery branches with bobbles */}
-      <g className="axo-gills" opacity="0.95">
-        <g fill="url(#axo-gill)">
-          <path d="M16 22 Q2 12 -6 4  Q6 10 18 18 Z" />
-          <path d="M14 28 Q-4 24 -12 20 Q4 24 18 26 Z" />
-          <path d="M16 34 Q2 38 -8 46  Q10 40 20 36 Z" />
-        </g>
-        {/* gill bobbles */}
-        <circle cx="-6" cy="4"  r="2" fill="#ffd2e1" />
-        <circle cx="-12" cy="20" r="2" fill="#ffd2e1" />
-        <circle cx="-8" cy="46" r="2" fill="#ffd2e1" />
-      </g>
-
-      {/* belly highlight */}
-      <ellipse cx="42" cy="44" rx="24" ry="7" fill="#ffe9f1" opacity="0.35" />
-
-      {/* body */}
-      <ellipse cx="44" cy="32" rx="32" ry="16" fill="url(#axo-body)" />
-
-      {/* legs (tiny stumps) */}
-      <ellipse cx="28" cy="48" rx="4" ry="3" fill="#a8336a" opacity="0.75" />
-      <ellipse cx="58" cy="48" rx="4" ry="3" fill="#a8336a" opacity="0.75" />
-      {/* tiny toes */}
-      <circle cx="25" cy="50" r="0.9" fill="#a8336a" opacity="0.6" />
-      <circle cx="28" cy="51" r="0.9" fill="#a8336a" opacity="0.6" />
-      <circle cx="31" cy="50" r="0.9" fill="#a8336a" opacity="0.6" />
-      <circle cx="55" cy="50" r="0.9" fill="#a8336a" opacity="0.6" />
-      <circle cx="58" cy="51" r="0.9" fill="#a8336a" opacity="0.6" />
-      <circle cx="61" cy="50" r="0.9" fill="#a8336a" opacity="0.6" />
-
-      {/* cheek blush */}
-      <ellipse cx="60" cy="36" rx="4.5" ry="2.2" fill="#ff9bc1" opacity="0.7" />
-
-      {/* eye — single big right-facing eye with eyelashes */}
-      <circle cx="66" cy="28" r="3.6" fill="#0a0e1a" />
-      <circle cx="67.4" cy="26.6" r="1.3" fill="#fff" />
-      <circle cx="65.2" cy="29.6" r="0.55" fill="#fff" />
-      {/* eyelashes */}
-      <path d="M63 25 L62 23.5" stroke="#0a0e1a" strokeWidth="0.8" strokeLinecap="round" />
-      <path d="M65 24.4 L64.6 22.6" stroke="#0a0e1a" strokeWidth="0.8" strokeLinecap="round" />
-      <path d="M67 24.3 L67.2 22.5" stroke="#0a0e1a" strokeWidth="0.8" strokeLinecap="round" />
-
-      {/* smile */}
-      <path d="M70 34 q3 2.8 5 0.4" stroke="#0a0e1a" strokeWidth="1.3" fill="none" strokeLinecap="round" />
-
-      {/* highlight on top of head */}
-      <ellipse cx="48" cy="22" rx="11" ry="3" fill="#ffe9f1" opacity="0.55" />
     </svg>
   );
 }
@@ -851,18 +837,25 @@ function WanderingAxolotl() {
   useEffect(() => {
     let raf = 0;
 
-    const pickTarget = () => {
-      const s = stateRef.current;
-      const W = Math.max(360, window.innerWidth);
-      const H = Math.max(480, window.innerHeight);
-      // avoid status-bar (top ~120) and very edges
-      s.tx = 60 + Math.random() * (W - 180);
-      s.ty = 140 + Math.random() * (H - 220);
-    };
-    pickTarget();
+    // Follow cursor — axolotl only moves when mouse moves
+    let mouseX = window.innerWidth / 2;
+    let mouseY = window.innerHeight / 2;
+    let isMouseMoving = false;
+    let mouseTimeout = 0;
 
-    const onResize = () => pickTarget();
-    window.addEventListener("resize", onResize);
+    const onMouseMove = (e: MouseEvent) => {
+      mouseX = e.clientX;
+      mouseY = e.clientY + 30; // offset below cursor
+      isMouseMoving = true;
+      clearTimeout(mouseTimeout);
+      mouseTimeout = window.setTimeout(() => { isMouseMoving = false; }, 200);
+    };
+    window.addEventListener("mousemove", onMouseMove, { passive: true });
+
+    // Initial target = center
+    const s0 = stateRef.current;
+    s0.tx = mouseX;
+    s0.ty = mouseY;
 
     const tick = (t: number) => {
       const s = stateRef.current;
@@ -870,8 +863,17 @@ function WanderingAxolotl() {
       const dy = s.ty - s.y;
       const dist = Math.hypot(dx, dy);
 
-      // when close to target, pick a new one
-      if (dist < 40) pickTarget();
+      // Update target from cursor position
+      s.tx = mouseX;
+      s.ty = mouseY;
+
+      // When mouse stops, slow down and stop
+      if (!isMouseMoving && dist < 5) {
+        s.vx *= 0.85;
+        s.vy *= 0.85;
+        raf = requestAnimationFrame(tick);
+        return;
+      }
 
       // steer with gentle acceleration
       const steer = 0.05 + s.speedBoost * 0.15;
@@ -934,7 +936,7 @@ function WanderingAxolotl() {
     raf = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("resize", onResize);
+      window.removeEventListener("mousemove", onMouseMove);
     };
   }, []);
 
@@ -959,7 +961,7 @@ function WanderingAxolotl() {
       <button
         ref={containerRef}
         className="wandering-axolotl"
-        aria-label="GitAxolotl mascot — wandering the network"
+        aria-label="GitAxolotl mascot — follows your cursor"
         onClick={(e) => dartTo(e.clientX, e.clientY)}
       >
         <AxolotlSVG />

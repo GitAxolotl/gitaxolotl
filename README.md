@@ -1,94 +1,70 @@
 # GitAxolotl
 
-[![CI](https://github.com/GitAxolotl/gitaxolotl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GitAxolotl/gitaxolotl/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Vite](https://img.shields.io/badge/Vite-react--ts-646CFF?logo=vite)](https://vitejs.dev/)
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FGitAxolotl%2Fgitaxolotl)
+![Base](https://img.shields.io/badge/Base-0052FF?style=flat-square&logo=coinbase&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)
+![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
 
-> Network error regeneration dashboard for the GitLawB / OpenClaude ecosystem.
-
-GitAxolotl visualises infrastructure errors as a healing pipeline that flows
-from **CRITICAL → DIAGNOSED → REGENERATING → HEALED**, just like an axolotl
-regrowing a limb. A wandering pink mascot swims across the dashboard while
-six agents (CIPHER, FORGE, HELIX, ATLAS, QUILL, NEXUS) regenerate the
-network in real time.
+> Network error detection & regeneration dashboard for the GitLawB decentralized agent network.
 
 ![Screenshot](docs/overview.png)
 
-## Highlights
+## How it works
 
-- **Five live sections**
-  - Sticky status bar with per-severity sparklines
-  - 4-stage Healing Pipeline with animated cyan packet flow + arrowheads
-  - 18 Healing Cards (severity pill, file path, agent button, striped
-    progress bar, expandable timeline)
-  - 6 Agent rings (SVG count-up, green / amber / red by health)
-  - Terminal-style Regeneration Log streaming new entries every 3.5 s
-- **Wandering Axolotl mascot** — random-walk steering with tail swish, gill
-  flutter, dorsal-fin undulation, trail bubbles, and click-to-dart at the
-  cursor.
-- **Atmosphere** — particle field background, mouse-follow cursor glow,
-  scanline overlay, viewport vignette.
-- **Cross-section linking** — clicking a pipeline stage or an agent filters
-  the cards and re-counts the status bar; clicking an agent inside a card
-  scrolls to and highlights the agent grid.
-- **Keyboard shortcuts** — `1` / `2` / `3` / `4` filter by stage, `0` clears.
-- **Mobile rules** — ≤768 px stacks into 2-column status grid + vertical
-  pipeline; ≤480 px hides the mascot.
+```mermaid
+flowchart LR
+    A([GitLawB Network]) -->|"scan"| B[Error Detection]
 
-## Tech
+    subgraph GitAxolotl
+        C["01 Critical"]
+        D["02 Diagnosed"]
+        E["03 Regenerating"]
+        F["04 Healed"]
+    end
 
-- Vite + React + TypeScript
-- Single-file architecture: `src/App.tsx` + `src/index.css`
-- Zero runtime dependencies beyond React
+    B --> C --> D --> E --> F
+
+    subgraph "Agent Fleet"
+        G[CIPHER]
+        H[FORGE]
+        I[HELIX]
+        J[ATLAS]
+        K[QUILL]
+        L[NEXUS]
+    end
+
+    D --> G & H & I & J & K & L
+    F --> M([Network Restored])
+```
+
+## Features
+
+- **Healing Pipeline** — 4-stage visualization: Critical → Diagnosed → Regenerating → Healed
+- **18 Error Cards** — severity pills, file paths, agent assignments, progress bars, expandable descriptions
+- **Agent Health Grid** — 6 agents with SVG ring charts, specialty tags, success rates
+- **Regeneration Log** — terminal-style streaming feed, new entries every 3.5s
+- **Axolotl Mascot** — line-art cursor follower with smooth lerp, tail wave, breathing animation
+- **Monochrome Design** — black/white/glassmorphism, custom cursor, stagger animations
+- **Keyboard Shortcuts** — `1`-`4` filter by stage, `0` clears, `Escape` collapses
+- **Mobile Responsive** — stacks to 2-column grid, hides mascot on small screens
 
 ## Getting started
 
 ```bash
+git clone https://github.com/GitAxolotl/gitaxolotl.git
+cd gitaxolotl
 npm install
-npm run dev     # http://localhost:5173
-npm run build   # produces dist/
-npm run preview
+npm run dev
 ```
 
-## Project layout
+## Tech
 
-```
-src/
-  App.tsx       # all components, hooks, mock data
-  index.css     # design tokens, layout, animations
-  main.tsx      # React root
-index.html
-```
-
-## Mock data
-
-Static for now — `MOCK_ERRORS` (18), `MOCK_AGENTS` (6), and `LOG_SEEDS` (10
-cycling lines) live at the top of `App.tsx`. Swap them with a real feed
-when wiring to the GitLawB control plane.
-
-## Deploy
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FGitAxolotl%2Fgitaxolotl)
-
-The repo includes `vercel.json` for SPA rewrites and immutable asset caching.
-Click the button above, sign in to Vercel, and Vercel will detect Vite, run
-`npm run build`, and deploy `dist/` to a `*.vercel.app` URL automatically.
-
-To bind a custom domain (e.g. `gitaxolotl.gitlawb.app`) — in the Vercel project
-settings, add the domain and point a `CNAME` from the DNS provider to
-`cname.vercel-dns.com`.
-
-## Continuous integration
-
-Every push to `main` and every pull request triggers
-`.github/workflows/ci.yml`, which runs **lint → typecheck → build** on Node 22
-and uploads the `dist/` bundle as an artifact (7-day retention).
-
-Dependabot watches `package.json` weekly (Monday 09:00 Asia/Jakarta) and
-GitHub Actions monthly, grouping updates by react / vite / eslint /
-typescript.
+- Vite + React 19 + TypeScript 6
+- Single-file architecture: `src/App.tsx` + `src/index.css`
+- Zero runtime dependencies beyond React
+- Canvas-based axolotl cursor follower
 
 ## License
 
-[MIT](LICENSE) © devgitlawb
+MIT
