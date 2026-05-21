@@ -219,6 +219,32 @@ export default function App() {
         try { packageJson = JSON.parse(pkgFile); } catch {}
       }
 
+      // Fetch additional config files for deeper analysis
+      const [tsconfigContent, workflowFiles, contributingContent, changelogContent, securityContent] = await Promise.all([
+        fetchGitHubFile(owner, repo, 'tsconfig.json'),
+        // Fetch workflow file names
+        fetchGitHubAPI(`/repos/${owner}/${repo}/contents/.github/workflows`).catch(() => null),
+        fetchGitHubFile(owner, repo, 'CONTRIBUTING.md'),
+        fetchGitHubFile(owner, repo, 'CHANGELOG.md'),
+        fetchGitHubFile(owner, repo, 'SECURITY.md'),
+      ]);
+
+      // Parse tsconfig for strict mode
+      let tsconfig: any = null;
+      if (tsconfigContent) {
+        try { tsconfig = JSON.parse(tsconfigContent); } catch {}
+      }
+      const strictMode = tsconfig?.compilerOptions?.strict === true;
+
+      // Count workflow files
+      const workflowCount = Array.isArray(workflowFiles) ? workflowFiles.length : 0;
+
+      // Fetch first workflow file content if exists
+      let workflowContent = '';
+      if (Array.isArray(workflowFiles) && workflowFiles.length > 0) {
+        workflowContent = await fetchGitHubFile(owner, repo, `.github/workflows/${workflowFiles[0].name}`) || '';
+      }
+
       updatePipeline('fetch', 'done', `${files.length} files fetched`, `${Date.now() - fetchStart}ms`);
 
       // Step 3: Code Analysis
@@ -229,31 +255,81 @@ export default function App() {
       const filePaths = files.map(f => f.path);
       const totalLOC = files.reduce((sum, f) => sum + (f.size || 0), 0);
 
-      // Detect features
-      const hasTests = filePaths.some(p => 
-        /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(p) || 
-        p.includes('__tests__') || 
-        p.includes('/test/') ||
-        p.includes('/tests/')
+      // Deep feature detection
+      const testFiles = files.filter(f => 
+        /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(f.path) || 
+        f.path.includes('__tests__') || 
+        f.path.includes('/test/') ||
+        f.path.includes('/tests/')
       );
+      const sourceFiles = files.filter(f => 
+        /\.(ts|tsx|js|jsx)$/.test(f.path) && 
+        !f.path.includes('node_modules') &&
+        !f.path.includes('.d.ts')
+      );
+      const hasTests = testFiles.length > 0;
+      const testRatio = sourceFiles.length > 0 ? testFiles.length / sourceFiles.length : 0;
+      const hasTestConfig = filePaths.some(p => 
+        p.includes('jest.config') || p.includes('vitest.config') || 
+        p.includes('.mocharc') || p.includes('karma.conf')
+      );
+
       const hasCI = filePaths.some(p => 
         p.includes('.github/workflows') || 
         p.includes('.circleci') || 
         p.includes('.travis.yml') ||
         p.includes('Jenkinsfile')
       );
+      const hasBuildStep = workflowContent.includes('build') || workflowContent.includes('compile');
+      const hasTestStep = workflowContent.includes('test') || workflowContent.includes('jest') || workflowContent.includes('vitest');
+      const hasDeployStep = workflowContent.includes('deploy') || workflowContent.includes('publish');
+
       const hasLicense = filePaths.some(p => 
         p.toLowerCase().startsWith('license') || 
         p.toLowerCase().startsWith('licence')
       );
-      const hasTypescript = filePaths.some(p => p.endsWith('.ts') || p.endsWith('.tsx')) ||
-        !!pkgFile?.includes('"typescript"');
+      let licenseType = 'Unknown';
+      if (hasLicense) {
+        const licContent = await fetchGitHubFile(owner, repo, 'LICENSE') || '';
+        if (licContent.includes('MIT License') || licContent.includes('MIT')) licenseType = 'MIT';
+        else if (licContent.includes('Apache License') || licContent.includes('Apache-2.0')) licenseType = 'Apache 2.0';
+        else if (licContent.includes('GNU General Public License')) licenseType = 'GPL';
+        else if (licContent.includes('BSD')) licenseType = 'BSD';
+        else licenseType = 'Custom';
+      }
+
+      const tsFiles = files.filter(f => f.path.endsWith('.ts') || f.path.endsWith('.tsx'));
+      const jsFiles = files.filter(f => f.path.endsWith('.js') || f.path.endsWith('.jsx'));
+      const hasTypescript = tsFiles.length > 0 || !!pkgFile?.includes('"typescript"');
+      const tsRatio = (tsFiles.length + jsFiles.length) > 0 ? tsFiles.length / (tsFiles.length + jsFiles.length) : 0;
+
       const hasLinting = filePaths.some(p => 
-        p.includes('.eslintrc') || 
-        p.includes('.prettierrc') || 
-        p.includes('biome.json') ||
-        p.includes('eslint.config')
+        p.includes('.eslintrc') || p.includes('.prettierrc') || 
+        p.includes('biome.json') || p.includes('eslint.config')
       );
+      const hasLintScript = packageJson?.scripts?.lint || packageJson?.scripts?.format;
+      const hasPrettier = filePaths.some(p => p.includes('.prettierrc') || p.includes('prettier.config'));
+
+      // Code organization checks
+      const hasSrcDir = filePaths.some(p => p.startsWith('src/'));
+      const hasDocsDir = filePaths.some(p => p.startsWith('docs/'));
+      const hasContributing = !!contributingContent;
+      const hasChangelog = !!changelogContent;
+      const hasSecurity = !!securityContent;
+
+      // Package health
+      const hasBuildScript = !!packageJson?.scripts?.build;
+      const hasTestScript = !!packageJson?.scripts?.test;
+      const hasEngines = !!packageJson?.engines;
+      const hasProperScripts = hasBuildScript && hasTestScript;
+
+      // README quality analysis
+      const readmeLength = readmeContent?.length || 0;
+      const readmeSections = (readmeContent?.match(/^## /gm) || []).length;
+      const readmeCodeBlocks = (readmeContent?.match(/```/g) || []).length / 2;
+      const readmeHasInstall = readmeContent?.toLowerCase().includes('install') || readmeContent?.toLowerCase().includes('getting started');
+      const readmeHasUsage = readmeContent?.toLowerCase().includes('usage') || readmeContent?.toLowerCase().includes('example');
+      const readmeHasBadges = readmeContent?.includes('![') && (readmeContent?.includes('shield') || readmeContent?.includes('badge'));
 
       // Calculate LOC by language
       const langLOC: Record<string, number> = {};
@@ -272,7 +348,7 @@ export default function App() {
       });
 
       addLog(`Stack: ${Object.keys(langLOC).join(', ') || 'Unknown'}`, 'info');
-      addLog(`Tests: ${hasTests ? 'Yes' : 'No'} | CI: ${hasCI ? 'Yes' : 'No'} | TS: ${hasTypescript ? 'Yes' : 'No'}`, 'info');
+      addLog(`Tests: ${testFiles.length} files (${(testRatio * 100).toFixed(0)}% ratio) | CI: ${hasCI ? `${workflowCount} workflows` : 'No'} | TS: ${hasTypescript ? `${(tsRatio * 100).toFixed(0)}%` : 'No'}`, 'info');
 
       const repoResult: RepoData = {
         name: repoInfo.name,
@@ -300,60 +376,93 @@ export default function App() {
       setRepoData(repoResult);
       updatePipeline('analyze', 'done', `${files.length} files, ${Object.keys(langLOC).length} languages`, `${Date.now() - analyzeStart}ms`);
 
-      // Step 4: Quality Gates
+      // Step 4: Quality Gates - DATA-DRIVEN SCORING
       const gatesStart = Date.now();
       updatePipeline('gates', 'active', 'Running quality checks...');
       addLog('Running quality gates...', 'info');
 
+      // README Score (0-100): based on actual quality indicators
+      let readmeScore = 0;
+      let readmeDetail = 'Missing README.md';
+      if (readmeContent) {
+        readmeScore = 20; // base for having README
+        if (readmeLength > 500) readmeScore += 15; // not trivially short
+        if (readmeLength > 2000) readmeScore += 15; // substantial
+        if (readmeSections >= 3) readmeScore += 15; // well structured
+        if (readmeCodeBlocks >= 2) readmeScore += 10; // has code examples
+        if (readmeHasInstall) readmeScore += 10; // installation docs
+        if (readmeHasUsage) readmeScore += 10; // usage docs
+        if (readmeHasBadges) readmeScore += 5; // professional polish
+        readmeDetail = `${readmeLength} chars, ${readmeSections} sections, ${readmeCodeBlocks} code blocks`;
+        if (readmeHasInstall) readmeDetail += ', install docs';
+        if (readmeHasUsage) readmeDetail += ', usage docs';
+      }
+
+      // CI/CD Score (0-100): based on pipeline completeness
+      let ciScore = 0;
+      let ciDetail = 'No CI pipeline found';
+      if (hasCI) {
+        ciScore = 40; // base for having CI
+        if (workflowCount >= 2) ciScore += 15; // multiple workflows
+        if (hasBuildStep) ciScore += 15; // builds code
+        if (hasTestStep) ciScore += 15; // runs tests
+        if (hasDeployStep) ciScore += 15; // deploys
+        ciDetail = `${workflowCount} workflow(s)`;
+        const steps = [];
+        if (hasBuildStep) steps.push('build');
+        if (hasTestStep) steps.push('test');
+        if (hasDeployStep) steps.push('deploy');
+        if (steps.length > 0) ciDetail += `: ${steps.join(' → ')}`;
+      }
+
+      // Test Score (0-100): based on coverage indicators
+      let testScore = 0;
+      let testDetail = 'No test files found';
+      if (hasTests) {
+        testScore = 30; // base for having tests
+        if (testRatio > 0.1) testScore += 20; // decent ratio
+        if (testRatio > 0.3) testScore += 20; // good ratio
+        if (testRatio > 0.5) testScore += 15; // excellent ratio
+        if (hasTestConfig) testScore += 15; // proper config
+        testDetail = `${testFiles.length} test files, ${(testRatio * 100).toFixed(0)}% ratio`;
+        if (hasTestConfig) testDetail += ', configured';
+      }
+
+      // TypeScript Score (0-100): based on adoption depth
+      let tsScore = 0;
+      let tsDetail = 'JavaScript only';
+      if (hasTypescript) {
+        tsScore = 40; // base for having TS
+        if (tsRatio > 0.5) tsScore += 20; // majority TS
+        if (tsRatio > 0.8) tsScore += 15; // almost all TS
+        if (strictMode) tsScore += 25; // strict mode enabled
+        tsDetail = `${(tsRatio * 100).toFixed(0)}% TypeScript`;
+        if (strictMode) tsDetail += ', strict mode';
+      }
+
+      // Linting Score (0-100): based on setup completeness
+      let lintScore = 0;
+      let lintDetail = 'No linter config found';
+      if (hasLinting) {
+        lintScore = 50; // base for having linter
+        if (hasLintScript) lintScore += 25; // has lint script
+        if (hasPrettier) lintScore += 25; // has formatter
+        lintDetail = 'Linter configured';
+        if (hasLintScript) lintDetail += ', script available';
+        if (hasPrettier) lintDetail += ', prettier configured';
+      }
+
+      // License Score (0-100): recognized license = full score
+      const licenseScore = hasLicense ? 100 : 0;
+      const licenseDetail = hasLicense ? `${licenseType} license` : 'No license file';
+
       const gates: QualityGate[] = [
-        {
-          id: 'readme',
-          name: 'README',
-          icon: FileText,
-          status: hasLicense ? 'pass' : readmeContent ? 'pass' : 'fail',
-          detail: readmeContent ? `${Math.ceil((readmeContent.length || 0) / 100)}00+ chars` : 'Missing README.md',
-          score: readmeContent ? 100 : 0,
-        },
-        {
-          id: 'ci',
-          name: 'CI/CD',
-          icon: Zap,
-          status: hasCI ? 'pass' : 'warn',
-          detail: hasCI ? 'GitHub Actions detected' : 'No CI pipeline found',
-          score: hasCI ? 100 : 40,
-        },
-        {
-          id: 'tests',
-          name: 'Tests',
-          icon: TestTube,
-          status: hasTests ? 'pass' : 'warn',
-          detail: hasTests ? 'Test files detected' : 'No test files found',
-          score: hasTests ? 100 : 30,
-        },
-        {
-          id: 'typescript',
-          name: 'TypeScript',
-          icon: Code2,
-          status: hasTypescript ? 'pass' : 'warn',
-          detail: hasTypescript ? 'TypeScript enabled' : 'JavaScript only',
-          score: hasTypescript ? 100 : 60,
-        },
-        {
-          id: 'linting',
-          name: 'Linting',
-          icon: Settings,
-          status: hasLinting ? 'pass' : 'warn',
-          detail: hasLinting ? 'Linter configured' : 'No linter config found',
-          score: hasLinting ? 100 : 50,
-        },
-        {
-          id: 'license',
-          name: 'License',
-          icon: Scale,
-          status: hasLicense ? 'pass' : 'fail',
-          detail: hasLicense ? 'License file present' : 'No license file',
-          score: hasLicense ? 100 : 0,
-        },
+        { id: 'readme', name: 'README', icon: FileText, status: readmeScore >= 70 ? 'pass' : readmeScore >= 40 ? 'warn' : 'fail', detail: readmeDetail, score: readmeScore },
+        { id: 'ci', name: 'CI/CD', icon: Zap, status: ciScore >= 70 ? 'pass' : ciScore >= 40 ? 'warn' : 'fail', detail: ciDetail, score: ciScore },
+        { id: 'tests', name: 'Tests', icon: TestTube, status: testScore >= 70 ? 'pass' : testScore >= 40 ? 'warn' : 'fail', detail: testDetail, score: testScore },
+        { id: 'typescript', name: 'TypeScript', icon: Code2, status: tsScore >= 70 ? 'pass' : tsScore >= 40 ? 'warn' : 'fail', detail: tsDetail, score: tsScore },
+        { id: 'linting', name: 'Linting', icon: Settings, status: lintScore >= 70 ? 'pass' : lintScore >= 40 ? 'warn' : 'fail', detail: lintDetail, score: lintScore },
+        { id: 'license', name: 'License', icon: Scale, status: hasLicense ? 'pass' : 'fail', detail: licenseDetail, score: licenseScore },
       ];
 
       setQualityGates(gates);
