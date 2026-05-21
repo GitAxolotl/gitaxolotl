@@ -637,8 +637,27 @@ export default function App() {
           <div style={{ position: 'absolute', inset: 0, background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px)', pointerEvents: 'none' }} />
           {/* Center prompt when no analysis */}
           {!showAnalysis && (
-            <div style={{ position: 'absolute', bottom: 40, left: '50%', transform: 'translateX(-50%)', textAlign: 'center' }}>
-              <div style={{ color: '#555', fontSize: '11px', marginBottom: 8 }}>click to feed the axolotl</div>
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '20px' }}>
+              <div style={{ maxWidth: 500, margin: '0 auto' }}>
+                <div style={{ color: '#555', fontSize: '10px', textAlign: 'center', marginBottom: '8px' }}>click to feed the axolotl · enter a repo to analyze</div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input value={inputValue} onChange={e => setInputValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && analyze()}
+                    placeholder="owner/repo or GitHub URL"
+                    style={{ flex: 1, padding: '10px 14px', background: '#0d0f14ee', border: `1px solid ${theme.accent}33`, color: '#fff', fontSize: '12px', fontFamily: 'inherit', outline: 'none', borderRadius: '2px', backdropFilter: 'blur(8px)' }}
+                  />
+                  <button onClick={analyze} disabled={isAnalyzing || !inputValue.trim()}
+                    style={{ padding: '10px 18px', background: isAnalyzing ? '#1a1d24' : theme.accent, border: 'none', color: isAnalyzing ? '#555' : '#000', fontSize: '11px', fontWeight: 600, cursor: isAnalyzing ? 'wait' : 'pointer', fontFamily: 'inherit', borderRadius: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    {isAnalyzing ? <Loader2 size={12} className="spin" /> : <Zap size={12} />}
+                    {isAnalyzing ? 'Analyzing...' : 'Analyze'}
+                  </button>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '8px' }}>
+                  {['GitAxolotl/gitaxolotl', 'Gitlawb/openclaude', 'Gitlawb/contracts'].map(ex => (
+                    <button key={ex} onClick={() => setInputValue(ex)} style={{ padding: '3px 8px', background: '#0d0f14aa', border: `1px solid ${theme.accent}22`, color: '#555', fontSize: '9px', cursor: 'pointer', fontFamily: 'inherit', borderRadius: '2px' }}>{ex}</button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </div>
