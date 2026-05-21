@@ -7,6 +7,8 @@
 
 > A calm builder control room for the GitLawB hosted playground. Import a GitHub repository or a live website, watch the brief and quality gates resolve, then publish.
 
+![GitAxolotl builder control room](docs/overview.png)
+
 ## What it is
 
 GitAxolotl is the front door for the GitLawB app builder. It deliberately keeps the surface small:
