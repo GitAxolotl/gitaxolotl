@@ -244,6 +244,135 @@ function stepStatusLabel(status: StepStatus): string {
   return "Queued";
 }
 
+/* -------------------- mascot -------------------- */
+
+/**
+ * Axolotl mascot — single-color, geometric line + soft fill silhouette.
+ * Designed to read as confident and clean at any size: 24px favicon up to
+ * 220px hero figure. No cartoon eyes, no gradients per limb, no "AI 3D blob".
+ */
+function AxolotlMascot({
+  size = 220,
+  decorative = true,
+}: {
+  size?: number;
+  decorative?: boolean;
+}) {
+  const accent = "#c8f284";
+  return (
+    <svg
+      className="mascot-svg"
+      width={size}
+      height={size}
+      viewBox="0 0 200 200"
+      role={decorative ? undefined : "img"}
+      aria-label={decorative ? undefined : "GitAxolotl mascot"}
+      aria-hidden={decorative ? "true" : undefined}
+    >
+      <defs>
+        <linearGradient id="mascot-body" x1="30%" y1="10%" x2="70%" y2="100%">
+          <stop offset="0%" stopColor="#1f2a37" />
+          <stop offset="100%" stopColor="#0d1218" />
+        </linearGradient>
+        <radialGradient id="mascot-cheek" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor={accent} stopOpacity="0.55" />
+          <stop offset="100%" stopColor={accent} stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      {/* Soft halo */}
+      <circle cx="100" cy="100" r="82" fill="url(#mascot-cheek)" opacity="0.45" />
+
+      {/* Tail */}
+      <path
+        d="M100 160 C 96 178, 84 188, 70 188 C 86 178, 92 168, 96 158 Z"
+        fill="url(#mascot-body)"
+        stroke={accent}
+        strokeOpacity="0.4"
+        strokeWidth="1"
+      />
+
+      {/* Body */}
+      <path
+        d="M60 110 C 60 78, 78 60, 100 60 C 122 60, 140 78, 140 110 C 140 140, 124 162, 100 162 C 76 162, 60 140, 60 110 Z"
+        fill="url(#mascot-body)"
+        stroke={accent}
+        strokeOpacity="0.6"
+        strokeWidth="1.4"
+      />
+
+      {/* Belly highlight */}
+      <path
+        d="M82 118 C 84 138, 92 152, 100 152 C 108 152, 116 138, 118 118 C 116 130, 108 140, 100 140 C 92 140, 84 130, 82 118 Z"
+        fill={accent}
+        opacity="0.07"
+      />
+
+      {/* Outer gill plumes (3 each side) */}
+      <g fill="none" stroke={accent} strokeWidth="1.4" strokeLinecap="round" opacity="0.85">
+        <path d="M64 84 C 50 80, 40 70, 38 56" />
+        <path d="M62 92 C 44 92, 30 86, 24 74" />
+        <path d="M62 100 C 44 104, 30 104, 22 96" />
+        <path d="M136 84 C 150 80, 160 70, 162 56" />
+        <path d="M138 92 C 156 92, 170 86, 176 74" />
+        <path d="M138 100 C 156 104, 170 104, 178 96" />
+      </g>
+
+      {/* Gill tips */}
+      <g fill={accent} opacity="0.9">
+        <circle cx="38" cy="56" r="2.4" />
+        <circle cx="24" cy="74" r="2.4" />
+        <circle cx="22" cy="96" r="2.4" />
+        <circle cx="162" cy="56" r="2.4" />
+        <circle cx="176" cy="74" r="2.4" />
+        <circle cx="178" cy="96" r="2.4" />
+      </g>
+
+      {/* Head crown */}
+      <path
+        d="M70 78 C 80 64, 120 64, 130 78"
+        fill="none"
+        stroke={accent}
+        strokeOpacity="0.45"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+
+      {/* Eyes */}
+      <g fill="#e7ecf3">
+        <circle cx="86" cy="104" r="3.2" />
+        <circle cx="114" cy="104" r="3.2" />
+      </g>
+      <g fill={accent}>
+        <circle cx="87.2" cy="103" r="1.1" />
+        <circle cx="115.2" cy="103" r="1.1" />
+      </g>
+
+      {/* Cheek dots */}
+      <g fill={accent} opacity="0.5">
+        <circle cx="76" cy="118" r="2.4" />
+        <circle cx="124" cy="118" r="2.4" />
+      </g>
+
+      {/* Smile */}
+      <path
+        d="M92 124 C 96 130, 104 130, 108 124"
+        fill="none"
+        stroke="#e7ecf3"
+        strokeOpacity="0.7"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+
+      {/* Foreground sparks */}
+      <g fill={accent} opacity="0.7">
+        <circle cx="154" cy="40" r="1.6" />
+        <circle cx="46" cy="38" r="1.2" />
+      </g>
+    </svg>
+  );
+}
+
 /* -------------------- header -------------------- */
 
 function Topbar({
@@ -257,12 +386,25 @@ function Topbar({
     <header className="topbar" role="banner">
       <a className="brand" href="#top" aria-label="GitAxolotl home">
         <span className="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M5 13c0-4 3.6-7 7-7s7 3 7 7" />
-            <path d="M9 13a3 3 0 1 0 6 0" />
-            <path d="M4 13c-1 .8-1 2.2 0 3" />
-            <path d="M20 13c1 .8 1 2.2 0 3" />
-            <path d="M12 16v3" />
+          <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <path
+              d="M16 6 C 10 6, 6 11, 6 17 C 6 23, 10 26, 16 26 C 22 26, 26 23, 26 17 C 26 11, 22 6, 16 6 Z"
+              fill="currentColor"
+              opacity="0.16"
+            />
+            <path
+              d="M16 6 C 10 6, 6 11, 6 17 C 6 23, 10 26, 16 26 C 22 26, 26 23, 26 17 C 26 11, 22 6, 16 6 Z"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              fill="none"
+            />
+            <path d="M7 11 C 4 10, 2.5 7.5, 2.5 5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+            <path d="M6.5 16 C 3 16, 1 14, 0.5 12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+            <path d="M25 11 C 28 10, 29.5 7.5, 29.5 5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+            <path d="M25.5 16 C 29 16, 31 14, 31.5 12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+            <circle cx="13" cy="17.5" r="1.3" fill="currentColor" />
+            <circle cx="19" cy="17.5" r="1.3" fill="currentColor" />
+            <path d="M14 21 C 15 22.4, 17 22.4, 18 21" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" fill="none" />
           </svg>
         </span>
         <span className="brand-text">
@@ -350,6 +492,14 @@ function Hero({
       </div>
 
       <aside className="hero-panel" aria-label="Build readiness snapshot">
+        <figure className="mascot-figure" aria-hidden="true">
+          <AxolotlMascot size={148} />
+          <figcaption>
+            <span className="eyebrow muted">Mascot</span>
+            <strong>Axo</strong>
+            <small>Quiet editor. Reads the brief before anyone types.</small>
+          </figcaption>
+        </figure>
         <div className="hero-panel-head">
           <div>
             <p className="eyebrow muted">Build readiness</p>
