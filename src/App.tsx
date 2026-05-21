@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   GitBranch, Star, FileCode, Clock, 
   Loader2, ExternalLink, Zap, Shield,
-  Code2, TestTube, FileText, Scale, Settings, Activity
+  Code2, TestTube, FileText, Scale, Settings, Activity,
+  SlidersHorizontal, Terminal, Flame
 } from 'lucide-react';
 
 // ============================================
@@ -18,7 +19,6 @@ interface RepoData {
   forks: number;
   language: string;
   languages: Record<string, number>;
-  files: FileNode[];
   readme: string;
   packageJson: any;
   hasTests: boolean;
@@ -31,13 +31,15 @@ interface RepoData {
   lastUpdated: string;
   topics: string[];
   defaultBranch: string;
-}
-
-interface FileNode {
-  name: string;
-  path: string;
-  type: 'file' | 'dir';
-  size?: number;
+  testFiles: number;
+  testRatio: number;
+  tsRatio: number;
+  strictMode: boolean;
+  workflowCount: number;
+  licenseType: string;
+  readmeLength: number;
+  readmeSections: number;
+  readmeCodeBlocks: number;
 }
 
 interface QualityGate {
@@ -64,9 +66,29 @@ interface ActivityLog {
 }
 
 // ============================================
+// THEMES
+// ============================================
+interface ColorTheme {
+  id: string;
+  name: string;
+  accent: string;
+  glow: string;
+  bg: string;
+  rain: string;
+}
+
+const THEMES: ColorTheme[] = [
+  { id: 'green', name: 'Emerald', accent: '#00ff66', glow: '#00ff55', bg: '#07090d', rain: 'rgba(0,255,102,0.08)' },
+  { id: 'amber', name: 'Amber', accent: '#ffaa00', glow: '#ff9900', bg: '#0c0500', rain: 'rgba(255,170,0,0.06)' },
+  { id: 'cyan', name: 'Cyan', accent: '#00f0ff', glow: '#00bcff', bg: '#080010', rain: 'rgba(0,240,255,0.06)' },
+  { id: 'red', name: 'Crimson', accent: '#ff2a2a', glow: '#ff0000', bg: '#0a0002', rain: 'rgba(255,42,42,0.06)' },
+];
+
+// ============================================
 // MAIN APP
 // ============================================
 export default function App() {
+  const [themeId, setThemeId] = useState('green');
   const [sourceKind, setSourceKind] = useState<SourceKind>('repo');
   const [inputValue, setInputValue] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -76,893 +98,711 @@ export default function App() {
   const [activityLog, setActivityLog] = useState<ActivityLog[]>([]);
   const [qualityScore, setQualityScore] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [showAnalysis, setShowAnalysis] = useState(false);
   const [nodeStatus, setNodeStatus] = useState<any>(null);
-  const logRef = useRef<HTMLDivElement>(null);
 
-  // Fetch GitLawB node status on mount
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+  const animRef = useRef({ time: 0, angle: 0, ax: 0, ay: 0, joy: 0, joyDur: 0 });
+  const rainRef = useRef<{ x: number; y: number; speed: number; chars: string[]; op: number }[]>([]);
+  const foodRef = useRef<{ id: number; x: number; y: number; val: string; speed: number; rot: number; eaten: boolean }[]>([]);
+  const particlesRef = useRef<{ x: number; y: number; vx: number; vy: number; char: string; life: number }[]>([]);
+
+  const theme = THEMES.find(t => t.id === themeId) || THEMES[0];
+
+  // Fetch node status
   useEffect(() => {
-    fetch('https://node.gitlawb.com/')
-      .then(r => r.json())
-      .then(setNodeStatus)
-      .catch(() => {});
+    fetch('https://node.gitlawb.com/').then(r => r.json()).then(setNodeStatus).catch(() => {});
   }, []);
 
   // Auto-scroll log
   useEffect(() => {
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [activityLog]);
 
-  const addLog = useCallback((message: string, type: ActivityLog['type'] = 'info') => {
-    const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    setActivityLog(prev => [...prev, { time, message, type }]);
+  // ============================================
+  // CANVAS ANIMATION
+  // ============================================
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const resize = () => {
+      const p = canvas.parentElement;
+      if (!p) return;
+      canvas.width = p.clientWidth;
+      canvas.height = p.clientHeight;
+      initRain(canvas.width);
+    };
+    resize();
+    const obs = new ResizeObserver(resize);
+    if (canvas.parentElement) obs.observe(canvas.parentElement);
+    return () => obs.disconnect();
   }, []);
 
-  const updatePipeline = useCallback((stepId: string, status: PipelineStep['status'], detail: string, duration?: string) => {
-    setPipeline(prev => prev.map(s => 
-      s.id === stepId ? { ...s, status, detail, duration: duration || s.duration } : s
-    ));
+  const initRain = useCallback((w: number) => {
+    const streams: typeof rainRef.current = [];
+    const chars = '01ABCDEF@#$%&*='.split('');
+    for (let i = 0; i < Math.ceil(w / 15); i++) {
+      if (Math.random() > 0.4) {
+        const c: string[] = [];
+        for (let j = 0; j < 5 + Math.floor(Math.random() * 12); j++) c.push(chars[Math.floor(Math.random() * chars.length)]);
+        streams.push({ x: i * 15, y: Math.random() * -1000, speed: 1 + Math.random() * 2.5, chars: c, op: 0.1 + Math.random() * 0.8 });
+      }
+    }
+    rainRef.current = streams;
   }, []);
 
-  // ============================================
-  // GITHUB API FETCHING
-  // ============================================
-  const fetchGitHubAPI = async (path: string) => {
-    const res = await fetch(`https://api.github.com${path}`, {
-      headers: { 'Accept': 'application/vnd.github.v3+json' }
-    });
-    if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
-    return res.json();
-  };
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-  const fetchGitHubFile = async (owner: string, repo: string, path: string): Promise<string | null> => {
-    try {
-      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {
-        headers: { 'Accept': 'application/vnd.github.v3.raw' }
+    let frame: number;
+    const render = () => {
+      const W = canvas.width, H = canvas.height;
+      const cx = W / 2, cy = H / 2;
+      const s = animRef.current;
+      s.time += 0.016;
+
+      // Background
+      ctx.fillStyle = theme.bg;
+      ctx.fillRect(0, 0, W, H);
+
+      // Grid
+      ctx.strokeStyle = theme.rain;
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      for (let x = cx % 40; x < W; x += 40) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+      for (let y = cy % 40; y < H; y += 40) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+      ctx.stroke();
+
+      // Rain
+      ctx.font = '10px Courier New';
+      rainRef.current.forEach(stream => {
+        stream.y += stream.speed;
+        if (stream.y > H + 50) { stream.y = Math.random() * -200; stream.speed = 0.8 + Math.random() * 2.5; }
+        stream.chars.forEach((ch, i) => {
+          const y = stream.y - i * 14;
+          if (y > 0 && y < H) {
+            ctx.fillStyle = theme.rain.replace(/[\d.]+\)$/, `${stream.op * (1 - i / stream.chars.length) * 0.4})`);
+            ctx.fillText(ch, stream.x, y);
+          }
+        });
       });
-      if (!res.ok) return null;
-      return await res.text();
-    } catch { return null; }
-  };
 
-  const fetchLanguages = async (owner: string, repo: string): Promise<Record<string, number>> => {
-    try {
-      return await fetchGitHubAPI(`/repos/${owner}/${repo}/languages`);
-    } catch { return {}; }
-  };
+      // Food chips
+      const food = foodRef.current.filter(f => !f.eaten && f.y < H + 20);
+      food.forEach(f => {
+        f.y += f.speed * 0.4;
+        f.rot += 0.01;
+        ctx.save();
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = theme.accent;
+        ctx.translate(f.x, f.y);
+        ctx.rotate(f.rot);
+        ctx.strokeStyle = theme.accent;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, 10, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(f.val, 0, 0);
+        ctx.restore();
+      });
 
-  const fetchRepoTree = async (owner: string, repo: string, branch: string): Promise<FileNode[]> => {
-    try {
-      const data = await fetchGitHubAPI(`/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`);
-      return (data.tree || []).map((item: any) => ({
-        name: item.path.split('/').pop(),
-        path: item.path,
-        type: item.type === 'tree' ? 'dir' : 'file',
-        size: item.size
-      }));
-    } catch { return []; }
+      // Particles
+      particlesRef.current = particlesRef.current.filter(p => p.life > 0);
+      particlesRef.current.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 0.02;
+        ctx.fillStyle = theme.accent.replace(')', `,${p.life})`).replace('rgb', 'rgba');
+        ctx.font = '10px monospace';
+        ctx.fillText(p.char, p.x, p.y);
+      });
+
+      // Logo (hexagon)
+      const pulse = Math.sin(s.time * 2) * 2.5;
+      const hx = cx, hy = cy + 45;
+      const R = 23 + pulse * 0.12;
+      const rcos = R * 0.866;
+      ctx.save();
+      ctx.shadowBlur = 15 + pulse * 1.5;
+      ctx.shadowColor = '#fff';
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 6;
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(hx, hy - R);
+      ctx.lineTo(hx + rcos, hy - R/2);
+      ctx.lineTo(hx + rcos + 10, hy - R/2);
+      ctx.lineTo(hx + rcos + 10, hy - R/5);
+      ctx.lineTo(hx + rcos, hy - R/5);
+      ctx.lineTo(hx + rcos, hy + R/5);
+      ctx.lineTo(hx + rcos + 10, hy + R/5);
+      ctx.lineTo(hx + rcos + 10, hy + R/2);
+      ctx.lineTo(hx + rcos, hy + R/2);
+      ctx.lineTo(hx, hy + R);
+      ctx.lineTo(hx - rcos, hy + R/2);
+      ctx.lineTo(hx - rcos, hy - R/2);
+      ctx.closePath();
+      ctx.stroke();
+      // Inner hex
+      const iR = R - 8, ircos = iR * 0.866;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(hx, hy - iR);
+      ctx.lineTo(hx + ircos, hy - iR/2);
+      ctx.lineTo(hx + ircos, hy + iR/2);
+      ctx.lineTo(hx, hy + iR);
+      ctx.lineTo(hx - ircos, hy + iR/2);
+      ctx.lineTo(hx - ircos, hy - iR/2);
+      ctx.closePath();
+      ctx.stroke();
+      // Stem + branches
+      ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.moveTo(cx, hy - R); ctx.lineTo(cx, cy - 10); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, cy - 10); ctx.lineTo(cx - 52, cy - 62); ctx.lineTo(cx - 52, cy - 95); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, cy - 10); ctx.lineTo(cx + 52, cy - 62); ctx.lineTo(cx + 52, cy - 95); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + 20, cy - 30); ctx.lineTo(cx + 20, cy - 65); ctx.stroke();
+      // Nodes
+      const drawNode = (nx: number, ny: number) => {
+        ctx.beginPath(); ctx.arc(nx, ny, 10, 0, Math.PI * 2);
+        ctx.fillStyle = theme.bg; ctx.fill(); ctx.stroke();
+      };
+      drawNode(cx - 52, cy - 106);
+      drawNode(cx + 20, cy - 76);
+      drawNode(cx + 52, cy - 106);
+      ctx.restore();
+
+      // Axolotl movement
+      let tx = cx, ty = cy, found = false;
+      if (food.length > 0) {
+        let nearest = food[0], minD = Infinity;
+        food.forEach(f => {
+          const d = Math.hypot(f.x - s.ax, f.y - s.ay);
+          if (d < minD) { minD = d; nearest = f; }
+        });
+        tx = nearest.x; ty = nearest.y; found = true;
+        if (minD < 25) {
+          nearest.eaten = true;
+          s.joy = 1; s.joyDur = 25;
+          for (let p = 0; p < 22; p++) {
+            const a = Math.random() * Math.PI * 2;
+            particlesRef.current.push({ x: s.ax, y: s.ay, vx: Math.cos(a) * (2 + Math.random() * 4.5), vy: Math.sin(a) * (2 + Math.random() * 4.5), char: Math.random() > 0.5 ? '1' : '0', life: 1 });
+          }
+        }
+      }
+
+      if (found) {
+        const dx = tx - s.ax, dy = ty - s.ay;
+        const a = Math.atan2(dy, dx);
+        s.ax += Math.cos(a) * 4.8;
+        s.ay += Math.sin(a) * 4.8;
+      } else {
+        s.angle += 0.015;
+        s.ax += (cx + 170 * Math.cos(s.angle) - s.ax) * 0.12;
+        s.ay += (cy + 170 * Math.sin(s.angle) - s.ay) * 0.12;
+      }
+
+      if (s.joy > 0) { s.joyDur--; if (s.joyDur <= 0) s.joy -= 0.05; }
+
+      // Draw axolotl (simplified)
+      const swing = Math.sin(s.time * 12) * 1.2;
+      ctx.save();
+      ctx.translate(s.ax, s.ay);
+      ctx.rotate(Math.atan2(cy - s.ay, cx - s.ax) + Math.PI / 2);
+      ctx.strokeStyle = theme.accent;
+      ctx.fillStyle = theme.accent;
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = theme.glow;
+      // Body
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 12, 16, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      // Tail
+      ctx.beginPath();
+      ctx.moveTo(0, 16);
+      ctx.quadraticCurveTo(swing * 3, 28, swing * 5, 35);
+      ctx.stroke();
+      // Gills
+      ctx.lineWidth = 1.5;
+      [-1, 1].forEach(side => {
+        ctx.beginPath();
+        ctx.moveTo(side * 8, -8);
+        ctx.lineTo(side * 16, -16);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(side * 8, -6);
+        ctx.lineTo(side * 14, -12);
+        ctx.stroke();
+      });
+      // Eyes
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(-5, -6, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(5, -6, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.beginPath(); ctx.arc(-5, -6, 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(5, -6, 1.5, 0, Math.PI * 2); ctx.fill();
+      // Cheeks (joy)
+      if (s.joy > 0) {
+        ctx.fillStyle = `rgba(255,150,150,${s.joy * 0.5})`;
+        ctx.beginPath(); ctx.arc(-8, -2, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(8, -2, 3, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+
+      frame = requestAnimationFrame(render);
+    };
+    frame = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(frame);
+  }, [theme]);
+
+  // Canvas click → drop food
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    foodRef.current.push({ id: Date.now(), x, y, val: Math.random() > 0.5 ? '1' : '0', speed: 1 + Math.random() * 1.5, rot: Math.random() * Math.PI * 2, eaten: false });
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + Math.random() * 0.5;
+      particlesRef.current.push({ x, y, vx: Math.cos(a) * (1.5 + Math.random() * 2.5), vy: Math.sin(a) * (1.5 + Math.random() * 2.5), char: Math.random() > 0.5 ? '0' : '1', life: 1 });
+    }
   };
 
   // ============================================
-  // ANALYSIS ENGINE
+  // GITHUB API
   // ============================================
-  const analyzeRepo = async () => {
+  const gh = async (path: string) => {
+    const r = await fetch(`https://api.github.com${path}`, { headers: { 'Accept': 'application/vnd.github.v3+json' } });
+    if (!r.ok) throw new Error(`GitHub API: ${r.status}`);
+    return r.json();
+  };
+  const ghFile = async (owner: string, repo: string, path: string) => {
+    try { const r = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, { headers: { 'Accept': 'application/vnd.github.v3.raw' } }); return r.ok ? await r.text() : null; } catch { return null; }
+  };
+
+  const addLog = useCallback((msg: string, type: ActivityLog['type'] = 'info') => {
+    const t = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setActivityLog(p => [...p, { time: t, message: msg, type }]);
+  }, []);
+
+  const updateStep = useCallback((id: string, status: PipelineStep['status'], detail: string, dur?: string) => {
+    setPipeline(p => p.map(s => s.id === id ? { ...s, status, detail, duration: dur || s.duration } : s));
+  }, []);
+
+  // ============================================
+  // ANALYSIS
+  // ============================================
+  const analyze = async () => {
     if (!inputValue.trim()) return;
-    
-    setIsAnalyzing(true);
-    setError(null);
-    setRepoData(null);
-    setQualityGates([]);
-    setActivityLog([]);
-    setQualityScore(0);
+    setIsAnalyzing(true); setError(null); setRepoData(null); setQualityGates([]); setActivityLog([]); setQualityScore(0); setShowAnalysis(true);
 
-    // Initialize pipeline
     setPipeline([
-      { id: 'intake', name: 'Source Intake', status: 'active', detail: 'Parsing input...', duration: '—' },
+      { id: 'intake', name: 'Source Intake', status: 'active', detail: 'Parsing...', duration: '—' },
       { id: 'fetch', name: 'Data Fetch', status: 'queued', detail: 'Waiting...', duration: '—' },
       { id: 'analyze', name: 'Code Analysis', status: 'queued', detail: 'Waiting...', duration: '—' },
       { id: 'gates', name: 'Quality Gates', status: 'queued', detail: 'Waiting...', duration: '—' },
-      { id: 'brief', name: 'Brief Generation', status: 'queued', detail: 'Waiting...', duration: '—' },
+      { id: 'brief', name: 'Brief', status: 'queued', detail: 'Waiting...', duration: '—' },
       { id: 'build', name: 'Build Prep', status: 'queued', detail: 'Waiting...', duration: '—' },
     ]);
 
-    const startTime = Date.now();
-
+    const t0 = Date.now();
     try {
-      // Step 1: Parse input
       addLog('Parsing source input...', 'info');
       let owner = '', repo = '';
-      
-      const input = inputValue.trim();
-      if (input.includes('github.com')) {
-        const match = input.match(/github\.com\/([^\/]+)\/([^\/\s?#]+)/);
-        if (match) { owner = match[1]; repo = match[2].replace('.git', ''); }
-      } else if (input.includes('/')) {
-        [owner, repo] = input.split('/');
-      }
-      
-      if (!owner || !repo) {
-        throw new Error('Invalid format. Use: owner/repo or GitHub URL');
-      }
-
+      const inp = inputValue.trim();
+      if (inp.includes('github.com')) { const m = inp.match(/github\.com\/([^\/]+)\/([^\/\s?#]+)/); if (m) { owner = m[1]; repo = m[2].replace('.git', ''); } }
+      else if (inp.includes('/')) { [owner, repo] = inp.split('/'); }
+      if (!owner || !repo) throw new Error('Invalid format. Use: owner/repo or GitHub URL');
       addLog(`Resolved: ${owner}/${repo}`, 'success');
-      updatePipeline('intake', 'done', `${owner}/${repo}`, `${Date.now() - startTime}ms`);
+      updateStep('intake', 'done', `${owner}/${repo}`, `${Date.now() - t0}ms`);
 
-      // Step 2: Fetch real data
-      const fetchStart = Date.now();
-      updatePipeline('fetch', 'active', 'Contacting GitHub API...');
-      addLog('Fetching repository metadata...', 'info');
-
-      const [repoInfo, languages, readmeContent] = await Promise.all([
-        fetchGitHubAPI(`/repos/${owner}/${repo}`),
-        fetchLanguages(owner, repo),
-        fetchGitHubFile(owner, repo, 'README.md'),
+      // Fetch
+      const t1 = Date.now();
+      updateStep('fetch', 'active', 'Contacting GitHub API...');
+      const [info, langs, readme, pkg, tsconfig, wf, contrib, changelog, security] = await Promise.all([
+        gh(`/repos/${owner}/${repo}`),
+        gh(`/repos/${owner}/${repo}/languages`).catch(() => ({})),
+        ghFile(owner, repo, 'README.md'),
+        ghFile(owner, repo, 'package.json'),
+        ghFile(owner, repo, 'tsconfig.json'),
+        gh(`/repos/${owner}/${repo}/contents/.github/workflows`).catch(() => null),
+        ghFile(owner, repo, 'CONTRIBUTING.md'),
+        ghFile(owner, repo, 'CHANGELOG.md'),
+        ghFile(owner, repo, 'SECURITY.md'),
       ]);
+      addLog(`Stars: ${info.stargazers_count} | Forks: ${info.forks_count}`, 'info');
+      addLog(`Language: ${info.language || 'Unknown'}`, 'info');
 
-      addLog(`Found: ${repoInfo.description || 'No description'}`, 'info');
-      addLog(`Stars: ${repoInfo.stargazers_count} | Forks: ${repoInfo.forks_count}`, 'info');
-      addLog(`Language: ${repoInfo.language || 'Unknown'}`, 'info');
+      updateStep('fetch', 'active', 'Fetching file tree...');
+      const tree = await gh(`/repos/${owner}/${repo}/git/trees/${info.default_branch}?recursive=1`);
+      const files = (tree.tree || []).filter((f: any) => f.type === 'blob');
+      addLog(`${files.length} files found`, 'success');
 
-      updatePipeline('fetch', 'active', 'Fetching file tree...');
-      addLog('Fetching complete file tree...', 'info');
+      let pkgJson: any = null;
+      if (pkg) try { pkgJson = JSON.parse(pkg); } catch {}
+      let tsconfigJson: any = null;
+      if (tsconfig) try { tsconfigJson = JSON.parse(tsconfig); } catch {}
 
-      const tree = await fetchRepoTree(owner, repo, repoInfo.default_branch);
-      const files = tree.filter(f => f.type === 'file');
-      
-      addLog(`Found ${files.length} files in repository`, 'success');
+      const wfArr = Array.isArray(wf) ? wf : [];
+      let wfContent = '';
+      if (wfArr.length > 0) wfContent = await ghFile(owner, repo, `.github/workflows/${wfArr[0].name}`) || '';
 
-      // Fetch package.json if exists
-      let packageJson = null;
-      const pkgFile = await fetchGitHubFile(owner, repo, 'package.json');
-      if (pkgFile) {
-        try { packageJson = JSON.parse(pkgFile); } catch {}
-      }
+      updateStep('fetch', 'done', `${files.length} files`, `${Date.now() - t1}ms`);
 
-      // Fetch additional config files for deeper analysis
-      const [tsconfigContent, workflowFiles, contributingContent, changelogContent, securityContent] = await Promise.all([
-        fetchGitHubFile(owner, repo, 'tsconfig.json'),
-        // Fetch workflow file names
-        fetchGitHubAPI(`/repos/${owner}/${repo}/contents/.github/workflows`).catch(() => null),
-        fetchGitHubFile(owner, repo, 'CONTRIBUTING.md'),
-        fetchGitHubFile(owner, repo, 'CHANGELOG.md'),
-        fetchGitHubFile(owner, repo, 'SECURITY.md'),
-      ]);
+      // Analysis
+      const t2 = Date.now();
+      updateStep('analyze', 'active', 'Analyzing...');
+      const paths = files.map((f: any) => f.path);
+      const totalSize = files.reduce((s: number, f: any) => s + (f.size || 0), 0);
 
-      // Parse tsconfig for strict mode
-      let tsconfig: any = null;
-      if (tsconfigContent) {
-        try { tsconfig = JSON.parse(tsconfigContent); } catch {}
-      }
-      const strictMode = tsconfig?.compilerOptions?.strict === true;
+      const testFiles = files.filter((f: any) => /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(f.path) || f.path.includes('__tests__') || f.path.includes('/test/') || f.path.includes('/tests/'));
+      const srcFiles = files.filter((f: any) => /\.(ts|tsx|js|jsx)$/.test(f.path) && !f.path.includes('.d.ts'));
+      const tsFiles = files.filter((f: any) => f.path.endsWith('.ts') || f.path.endsWith('.tsx'));
+      const jsFiles = files.filter((f: any) => f.path.endsWith('.js') || f.path.endsWith('.jsx'));
 
-      // Count workflow files
-      const workflowCount = Array.isArray(workflowFiles) ? workflowFiles.length : 0;
-
-      // Fetch first workflow file content if exists
-      let workflowContent = '';
-      if (Array.isArray(workflowFiles) && workflowFiles.length > 0) {
-        workflowContent = await fetchGitHubFile(owner, repo, `.github/workflows/${workflowFiles[0].name}`) || '';
-      }
-
-      updatePipeline('fetch', 'done', `${files.length} files fetched`, `${Date.now() - fetchStart}ms`);
-
-      // Step 3: Code Analysis
-      const analyzeStart = Date.now();
-      updatePipeline('analyze', 'active', 'Analyzing codebase...');
-      addLog('Analyzing codebase structure...', 'info');
-
-      const filePaths = files.map(f => f.path);
-      const totalLOC = files.reduce((sum, f) => sum + (f.size || 0), 0);
-
-      // Deep feature detection
-      const testFiles = files.filter(f => 
-        /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(f.path) || 
-        f.path.includes('__tests__') || 
-        f.path.includes('/test/') ||
-        f.path.includes('/tests/')
-      );
-      const sourceFiles = files.filter(f => 
-        /\.(ts|tsx|js|jsx)$/.test(f.path) && 
-        !f.path.includes('node_modules') &&
-        !f.path.includes('.d.ts')
-      );
       const hasTests = testFiles.length > 0;
-      const testRatio = sourceFiles.length > 0 ? testFiles.length / sourceFiles.length : 0;
-      const hasTestConfig = filePaths.some(p => 
-        p.includes('jest.config') || p.includes('vitest.config') || 
-        p.includes('.mocharc') || p.includes('karma.conf')
-      );
-
-      const hasCI = filePaths.some(p => 
-        p.includes('.github/workflows') || 
-        p.includes('.circleci') || 
-        p.includes('.travis.yml') ||
-        p.includes('Jenkinsfile')
-      );
-      const hasBuildStep = workflowContent.includes('build') || workflowContent.includes('compile');
-      const hasTestStep = workflowContent.includes('test') || workflowContent.includes('jest') || workflowContent.includes('vitest');
-      const hasDeployStep = workflowContent.includes('deploy') || workflowContent.includes('publish');
-
-      const hasLicense = filePaths.some(p => 
-        p.toLowerCase().startsWith('license') || 
-        p.toLowerCase().startsWith('licence')
-      );
-      let licenseType = 'Unknown';
-      if (hasLicense) {
-        const licContent = await fetchGitHubFile(owner, repo, 'LICENSE') || '';
-        if (licContent.includes('MIT License') || licContent.includes('MIT')) licenseType = 'MIT';
-        else if (licContent.includes('Apache License') || licContent.includes('Apache-2.0')) licenseType = 'Apache 2.0';
-        else if (licContent.includes('GNU General Public License')) licenseType = 'GPL';
-        else if (licContent.includes('BSD')) licenseType = 'BSD';
-        else licenseType = 'Custom';
-      }
-
-      const tsFiles = files.filter(f => f.path.endsWith('.ts') || f.path.endsWith('.tsx'));
-      const jsFiles = files.filter(f => f.path.endsWith('.js') || f.path.endsWith('.jsx'));
-      const hasTypescript = tsFiles.length > 0 || !!pkgFile?.includes('"typescript"');
+      const testRatio = srcFiles.length > 0 ? testFiles.length / srcFiles.length : 0;
+      const hasCI = paths.some((p: string) => p.includes('.github/workflows'));
+      const hasLicense = paths.some((p: string) => p.toLowerCase().startsWith('license'));
+      const hasTS = tsFiles.length > 0;
       const tsRatio = (tsFiles.length + jsFiles.length) > 0 ? tsFiles.length / (tsFiles.length + jsFiles.length) : 0;
+      const strictMode = tsconfigJson?.compilerOptions?.strict === true;
+      const hasLint = paths.some((p: string) => p.includes('.eslintrc') || p.includes('.prettierrc') || p.includes('biome.json') || p.includes('eslint.config'));
 
-      const hasLinting = filePaths.some(p => 
-        p.includes('.eslintrc') || p.includes('.prettierrc') || 
-        p.includes('biome.json') || p.includes('eslint.config')
-      );
-      const hasLintScript = packageJson?.scripts?.lint || packageJson?.scripts?.format;
-      const hasPrettier = filePaths.some(p => p.includes('.prettierrc') || p.includes('prettier.config'));
+      let licType = 'Unknown';
+      if (hasLicense) {
+        const lc = await ghFile(owner, repo, 'LICENSE') || '';
+        if (lc.includes('MIT')) licType = 'MIT';
+        else if (lc.includes('Apache')) licType = 'Apache 2.0';
+        else if (lc.includes('GNU GPL')) licType = 'GPL';
+        else if (lc.includes('BSD')) licType = 'BSD';
+        else licType = 'Custom';
+      }
 
-      // Code organization checks
-      const hasSrcDir = filePaths.some(p => p.startsWith('src/'));
-      const hasDocsDir = filePaths.some(p => p.startsWith('docs/'));
-      const hasContributing = !!contributingContent;
-      const hasChangelog = !!changelogContent;
-      const hasSecurity = !!securityContent;
+      const hasBuildStep = wfContent.includes('build');
+      const hasTestStep = wfContent.includes('test');
+      const hasDeployStep = wfContent.includes('deploy') || wfContent.includes('publish');
+      const hasLintScript = pkgJson?.scripts?.lint || pkgJson?.scripts?.format;
+      const hasPrettier = paths.some((p: string) => p.includes('.prettierrc') || p.includes('prettier.config'));
 
-      // Package health
-      const hasBuildScript = !!packageJson?.scripts?.build;
-      const hasTestScript = !!packageJson?.scripts?.test;
-      const hasEngines = !!packageJson?.engines;
-      const hasProperScripts = hasBuildScript && hasTestScript;
+      // README quality
+      const rLen = readme?.length || 0;
+      const rSections = (readme?.match(/^## /gm) || []).length;
+      const rCode = (readme?.match(/```/g) || []).length / 2;
 
-      // README quality analysis
-      const readmeLength = readmeContent?.length || 0;
-      const readmeSections = (readmeContent?.match(/^## /gm) || []).length;
-      const readmeCodeBlocks = (readmeContent?.match(/```/g) || []).length / 2;
-      const readmeHasInstall = readmeContent?.toLowerCase().includes('install') || readmeContent?.toLowerCase().includes('getting started');
-      const readmeHasUsage = readmeContent?.toLowerCase().includes('usage') || readmeContent?.toLowerCase().includes('example');
-      const readmeHasBadges = readmeContent?.includes('![') && (readmeContent?.includes('shield') || readmeContent?.includes('badge'));
+      addLog(`Stack: ${hasTS ? 'TypeScript' : 'JavaScript'}${paths.some((p: string) => p.endsWith('.py')) ? ', Python' : ''}`, 'info');
+      addLog(`Tests: ${testFiles.length} files (${(testRatio * 100).toFixed(0)}%) | CI: ${hasCI ? `${wfArr.length} workflows` : 'No'} | TS: ${hasTS ? `${(tsRatio * 100).toFixed(0)}%` : 'No'}`, 'info');
 
-      // Calculate LOC by language
-      const langLOC: Record<string, number> = {};
-      files.forEach(f => {
-        const ext = f.name?.split('.').pop()?.toLowerCase() || '';
-        const langMap: Record<string, string> = {
-          ts: 'TypeScript', tsx: 'TypeScript', js: 'JavaScript', jsx: 'JavaScript',
-          py: 'Python', rs: 'Rust', go: 'Go', sol: 'Solidity',
-          css: 'CSS', html: 'HTML', md: 'Markdown', json: 'JSON',
-          yaml: 'YAML', yml: 'YAML', toml: 'TOML', sh: 'Shell',
-        };
-        const lang = langMap[ext];
-        if (lang) {
-          langLOC[lang] = (langLOC[lang] || 0) + (f.size || 0);
-        }
-      });
-
-      addLog(`Stack: ${Object.keys(langLOC).join(', ') || 'Unknown'}`, 'info');
-      addLog(`Tests: ${testFiles.length} files (${(testRatio * 100).toFixed(0)}% ratio) | CI: ${hasCI ? `${workflowCount} workflows` : 'No'} | TS: ${hasTypescript ? `${(tsRatio * 100).toFixed(0)}%` : 'No'}`, 'info');
-
-      const repoResult: RepoData = {
-        name: repoInfo.name,
-        full_name: repoInfo.full_name,
-        description: repoInfo.description || '',
-        stars: repoInfo.stargazers_count,
-        forks: repoInfo.forks_count,
-        language: repoInfo.language || 'Unknown',
-        languages: languages,
-        files: tree,
-        readme: readmeContent || '',
-        packageJson,
-        hasTests,
-        hasCI,
-        hasLicense,
-        hasTypescript,
-        hasLinting,
-        fileCount: files.length,
-        totalLOC,
-        lastUpdated: repoInfo.updated_at,
-        topics: repoInfo.topics || [],
-        defaultBranch: repoInfo.default_branch,
+      const rd: RepoData = {
+        name: info.name, full_name: info.full_name, description: info.description || '',
+        stars: info.stargazers_count, forks: info.forks_count, language: info.language || 'Unknown',
+        languages: langs, readme: readme || '', packageJson: pkgJson,
+        hasTests, hasCI, hasLicense, hasTypescript: hasTS, hasLinting: hasLint,
+        fileCount: files.length, totalLOC: totalSize, lastUpdated: info.updated_at,
+        topics: info.topics || [], defaultBranch: info.default_branch,
+        testFiles: testFiles.length, testRatio, tsRatio, strictMode,
+        workflowCount: wfArr.length, licenseType: licType,
+        readmeLength: rLen, readmeSections: rSections, readmeCodeBlocks: rCode,
       };
+      setRepoData(rd);
+      updateStep('analyze', 'done', `${files.length} files, ${Object.keys(langs).length} langs`, `${Date.now() - t2}ms`);
 
-      setRepoData(repoResult);
-      updatePipeline('analyze', 'done', `${files.length} files, ${Object.keys(langLOC).length} languages`, `${Date.now() - analyzeStart}ms`);
+      // Quality Gates — DATA-DRIVEN
+      const t3 = Date.now();
+      updateStep('gates', 'active', 'Running checks...');
 
-      // Step 4: Quality Gates - DATA-DRIVEN SCORING
-      const gatesStart = Date.now();
-      updatePipeline('gates', 'active', 'Running quality checks...');
-      addLog('Running quality gates...', 'info');
-
-      // README Score (0-100): based on actual quality indicators
-      let readmeScore = 0;
-      let readmeDetail = 'Missing README.md';
-      if (readmeContent) {
-        readmeScore = 20; // base for having README
-        if (readmeLength > 500) readmeScore += 15; // not trivially short
-        if (readmeLength > 2000) readmeScore += 15; // substantial
-        if (readmeSections >= 3) readmeScore += 15; // well structured
-        if (readmeCodeBlocks >= 2) readmeScore += 10; // has code examples
-        if (readmeHasInstall) readmeScore += 10; // installation docs
-        if (readmeHasUsage) readmeScore += 10; // usage docs
-        if (readmeHasBadges) readmeScore += 5; // professional polish
-        readmeDetail = `${readmeLength} chars, ${readmeSections} sections, ${readmeCodeBlocks} code blocks`;
-        if (readmeHasInstall) readmeDetail += ', install docs';
-        if (readmeHasUsage) readmeDetail += ', usage docs';
+      let rScore = 0;
+      if (readme) {
+        rScore = 20;
+        if (rLen > 500) rScore += 15;
+        if (rLen > 2000) rScore += 15;
+        if (rSections >= 3) rScore += 15;
+        if (rCode >= 2) rScore += 10;
+        if (readme?.toLowerCase().includes('install') || readme?.toLowerCase().includes('getting started')) rScore += 10;
+        if (readme?.toLowerCase().includes('usage') || readme?.toLowerCase().includes('example')) rScore += 10;
+        if (readme?.includes('![') && (readme?.includes('shield') || readme?.includes('badge'))) rScore += 5;
       }
-
-      // CI/CD Score (0-100): based on pipeline completeness
-      let ciScore = 0;
-      let ciDetail = 'No CI pipeline found';
+      let cScore = 0;
       if (hasCI) {
-        ciScore = 40; // base for having CI
-        if (workflowCount >= 2) ciScore += 15; // multiple workflows
-        if (hasBuildStep) ciScore += 15; // builds code
-        if (hasTestStep) ciScore += 15; // runs tests
-        if (hasDeployStep) ciScore += 15; // deploys
-        ciDetail = `${workflowCount} workflow(s)`;
-        const steps = [];
-        if (hasBuildStep) steps.push('build');
-        if (hasTestStep) steps.push('test');
-        if (hasDeployStep) steps.push('deploy');
-        if (steps.length > 0) ciDetail += `: ${steps.join(' → ')}`;
+        cScore = 40;
+        if (wfArr.length >= 2) cScore += 15;
+        if (hasBuildStep) cScore += 15;
+        if (hasTestStep) cScore += 15;
+        if (hasDeployStep) cScore += 15;
       }
-
-      // Test Score (0-100): based on coverage indicators
-      let testScore = 0;
-      let testDetail = 'No test files found';
+      let tScore = 0;
       if (hasTests) {
-        testScore = 30; // base for having tests
-        if (testRatio > 0.1) testScore += 20; // decent ratio
-        if (testRatio > 0.3) testScore += 20; // good ratio
-        if (testRatio > 0.5) testScore += 15; // excellent ratio
-        if (hasTestConfig) testScore += 15; // proper config
-        testDetail = `${testFiles.length} test files, ${(testRatio * 100).toFixed(0)}% ratio`;
-        if (hasTestConfig) testDetail += ', configured';
+        tScore = 30;
+        if (testRatio > 0.1) tScore += 20;
+        if (testRatio > 0.3) tScore += 20;
+        if (testRatio > 0.5) tScore += 15;
+        if (paths.some((p: string) => p.includes('jest.config') || p.includes('vitest.config'))) tScore += 15;
       }
-
-      // TypeScript Score (0-100): based on adoption depth
       let tsScore = 0;
-      let tsDetail = 'JavaScript only';
-      if (hasTypescript) {
-        tsScore = 40; // base for having TS
-        if (tsRatio > 0.5) tsScore += 20; // majority TS
-        if (tsRatio > 0.8) tsScore += 15; // almost all TS
-        if (strictMode) tsScore += 25; // strict mode enabled
-        tsDetail = `${(tsRatio * 100).toFixed(0)}% TypeScript`;
-        if (strictMode) tsDetail += ', strict mode';
+      if (hasTS) {
+        tsScore = 40;
+        if (tsRatio > 0.5) tsScore += 20;
+        if (tsRatio > 0.8) tsScore += 15;
+        if (strictMode) tsScore += 25;
       }
-
-      // Linting Score (0-100): based on setup completeness
-      let lintScore = 0;
-      let lintDetail = 'No linter config found';
-      if (hasLinting) {
-        lintScore = 50; // base for having linter
-        if (hasLintScript) lintScore += 25; // has lint script
-        if (hasPrettier) lintScore += 25; // has formatter
-        lintDetail = 'Linter configured';
-        if (hasLintScript) lintDetail += ', script available';
-        if (hasPrettier) lintDetail += ', prettier configured';
+      let lScore = 0;
+      if (hasLint) {
+        lScore = 50;
+        if (hasLintScript) lScore += 25;
+        if (hasPrettier) lScore += 25;
       }
-
-      // License Score (0-100): recognized license = full score
-      const licenseScore = hasLicense ? 100 : 0;
-      const licenseDetail = hasLicense ? `${licenseType} license` : 'No license file';
+      const licScore = hasLicense ? 100 : 0;
 
       const gates: QualityGate[] = [
-        { id: 'readme', name: 'README', icon: FileText, status: readmeScore >= 70 ? 'pass' : readmeScore >= 40 ? 'warn' : 'fail', detail: readmeDetail, score: readmeScore },
-        { id: 'ci', name: 'CI/CD', icon: Zap, status: ciScore >= 70 ? 'pass' : ciScore >= 40 ? 'warn' : 'fail', detail: ciDetail, score: ciScore },
-        { id: 'tests', name: 'Tests', icon: TestTube, status: testScore >= 70 ? 'pass' : testScore >= 40 ? 'warn' : 'fail', detail: testDetail, score: testScore },
-        { id: 'typescript', name: 'TypeScript', icon: Code2, status: tsScore >= 70 ? 'pass' : tsScore >= 40 ? 'warn' : 'fail', detail: tsDetail, score: tsScore },
-        { id: 'linting', name: 'Linting', icon: Settings, status: lintScore >= 70 ? 'pass' : lintScore >= 40 ? 'warn' : 'fail', detail: lintDetail, score: lintScore },
-        { id: 'license', name: 'License', icon: Scale, status: hasLicense ? 'pass' : 'fail', detail: licenseDetail, score: licenseScore },
+        { id: 'readme', name: 'README', icon: FileText, status: rScore >= 70 ? 'pass' : rScore >= 40 ? 'warn' : 'fail', detail: readme ? `${rLen} chars, ${rSections} sections` : 'Missing', score: rScore },
+        { id: 'ci', name: 'CI/CD', icon: Zap, status: cScore >= 70 ? 'pass' : cScore >= 40 ? 'warn' : 'fail', detail: hasCI ? `${wfArr.length} workflow(s)` : 'None', score: cScore },
+        { id: 'tests', name: 'Tests', icon: TestTube, status: tScore >= 70 ? 'pass' : tScore >= 40 ? 'warn' : 'fail', detail: hasTests ? `${testFiles.length} files, ${(testRatio * 100).toFixed(0)}%` : 'None', score: tScore },
+        { id: 'ts', name: 'TypeScript', icon: Code2, status: tsScore >= 70 ? 'pass' : tsScore >= 40 ? 'warn' : 'fail', detail: hasTS ? `${(tsRatio * 100).toFixed(0)}%${strictMode ? ', strict' : ''}` : 'JS only', score: tsScore },
+        { id: 'lint', name: 'Linting', icon: Settings, status: lScore >= 70 ? 'pass' : lScore >= 40 ? 'warn' : 'fail', detail: hasLint ? 'Configured' : 'None', score: lScore },
+        { id: 'license', name: 'License', icon: Scale, status: hasLicense ? 'pass' : 'fail', detail: hasLicense ? licType : 'None', score: licScore },
       ];
-
       setQualityGates(gates);
-      const avgScore = Math.round(gates.reduce((s, g) => s + g.score, 0) / gates.length);
-      setQualityScore(avgScore);
+      const avg = Math.round(gates.reduce((s, g) => s + g.score, 0) / gates.length);
+      setQualityScore(avg);
+      gates.forEach(g => { const i = g.status === 'pass' ? '✓' : g.status === 'warn' ? '!' : '✗'; addLog(`[${i}] ${g.name}: ${g.detail}`, g.status === 'pass' ? 'success' : g.status === 'warn' ? 'warn' : 'error'); });
+      addLog(`Quality Score: ${avg}/100`, avg >= 70 ? 'success' : 'warn');
+      updateStep('gates', 'done', `Score: ${avg}/100`, `${Date.now() - t3}ms`);
 
-      gates.forEach(g => {
-        const icon = g.status === 'pass' ? '✓' : g.status === 'warn' ? '!' : '✗';
-        addLog(`[${icon}] ${g.name}: ${g.detail}`, g.status === 'pass' ? 'success' : g.status === 'warn' ? 'warn' : 'error');
-      });
+      // Brief
+      updateStep('brief', 'active', 'Generating...');
+      addLog(`Brief: ${info.name} — ${info.description || 'No description'}`, 'info');
+      updateStep('brief', 'done', 'Ready', `${Date.now() - t0}ms`);
 
-      addLog(`Quality Score: ${avgScore}/100`, avgScore >= 70 ? 'success' : 'warn');
-      updatePipeline('gates', 'done', `Score: ${avgScore}/100`, `${Date.now() - gatesStart}ms`);
-
-      // Step 5: Brief Generation
-      const briefStart = Date.now();
-      updatePipeline('brief', 'active', 'Generating brief...');
-
-      const topLangs = Object.entries(languages)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 3)
-        .map(([lang]) => lang);
-
-      addLog(`Brief: ${repoInfo.name} — ${repoInfo.description || 'No description'}`, 'info');
-      addLog(`Stack: ${topLangs.join(', ')} | ${files.length} files | ${formatLOC(totalLOC)}`, 'info');
-      addLog(`Score: ${avgScore}/100 | ${hasTests ? 'Tested' : 'Untested'} | ${hasCI ? 'CI/CD' : 'No CI'}`, 'info');
-
-      updatePipeline('brief', 'done', 'Brief ready', `${Date.now() - briefStart}ms`);
-
-      // Step 6: Build Prep
-      updatePipeline('build', 'active', 'Preparing for Playground...');
-      addLog('Ready for GitLawB Playground deployment', 'success');
+      // Build
+      updateStep('build', 'active', 'Preparing...');
       addLog(`Playground: https://playground.gitlawb.com`, 'info');
       addLog(`GitHub: https://github.com/${owner}/${repo}`, 'info');
-      updatePipeline('build', 'done', 'Ready', `${Date.now() - startTime}ms`);
-
-      addLog(`Analysis complete in ${((Date.now() - startTime) / 1000).toFixed(1)}s`, 'success');
+      updateStep('build', 'done', 'Ready', `${Date.now() - t0}ms`);
+      addLog(`Analysis complete in ${((Date.now() - t0) / 1000).toFixed(1)}s`, 'success');
 
     } catch (err: any) {
       setError(err.message);
       addLog(`Error: ${err.message}`, 'error');
-      setPipeline(prev => prev.map(s => 
-        s.status === 'active' ? { ...s, status: 'error', detail: err.message } : s
-      ));
+      setPipeline(p => p.map(s => s.status === 'active' ? { ...s, status: 'error', detail: err.message } : s));
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  const formatLOC = (bytes: number) => {
-    if (bytes > 1000000) return `${(bytes / 1000000).toFixed(1)}MB`;
-    if (bytes > 1000) return `${(bytes / 1000).toFixed(0)}KB`;
-    return `${bytes}B`;
-  };
+  const fmt = (n: number) => n >= 1000000 ? `${(n/1000000).toFixed(1)}M` : n >= 1000 ? `${(n/1000).toFixed(1)}K` : n.toString();
+  const statusClr = (s: string) => s === 'pass' || s === 'done' || s === 'success' ? theme.accent : s === 'warn' || s === 'active' ? '#ffaa00' : s === 'fail' || s === 'error' ? '#ff2a2a' : '#555';
 
-  const formatNumber = (n: number) => {
-    if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-    return n.toString();
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'pass': case 'done': case 'success': return '#00ff66';
-      case 'warn': case 'active': return '#ffaa00';
-      case 'fail': case 'error': return '#ff2a2a';
-      default: return '#555';
-    }
-  };
-
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return '#00ff66';
-    if (score >= 60) return '#ffaa00';
-    return '#ff2a2a';
-  };
-
-  // ============================================
-  // RENDER
-  // ============================================
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: '#07090d',
-      color: '#e0e0e0',
-      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      fontSize: '13px',
-      lineHeight: '1.6',
-    }}>
+    <div style={{ minHeight: '100vh', background: theme.bg, color: '#e0e0e0', fontFamily: "'JetBrains Mono', monospace", fontSize: '13px' }}>
       {/* Header */}
-      <header style={{
-        borderBottom: '1px solid #1a1d24',
-        padding: '16px 24px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}>
+      <header style={{ borderBottom: '1px solid #1a1d24', padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ color: '#00ff66', fontSize: '18px', fontWeight: 700 }}>⬡</span>
+          <span style={{ color: theme.accent, fontSize: '16px', fontWeight: 700 }}>⬡</span>
           <span style={{ color: '#fff', fontWeight: 600, fontSize: '14px' }}>gitaxolotl</span>
           <span style={{ color: '#555', fontSize: '11px' }}>builder control room</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {/* Theme switcher */}
+          {THEMES.map(t => (
+            <button key={t.id} onClick={() => setThemeId(t.id)} style={{
+              width: 14, height: 14, borderRadius: '50%', background: t.accent,
+              border: themeId === t.id ? '2px solid #fff' : '2px solid transparent',
+              cursor: 'pointer', opacity: themeId === t.id ? 1 : 0.4,
+            }} />
+          ))}
           {nodeStatus && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#555', fontSize: '11px' }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#00ff66', display: 'inline-block' }} />
-              node v{nodeStatus.version}
-            </div>
+            <span style={{ color: '#555', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#00ff66' }} /> node v{nodeStatus.version}
+            </span>
           )}
-          <a href="https://playground.gitlawb.com" target="_blank" rel="noopener" style={{ color: '#555', fontSize: '11px', textDecoration: 'none' }}>
-            playground ↗
-          </a>
-          <a href="https://github.com/GitAxolotl/gitaxolotl" target="_blank" rel="noopener" style={{ color: '#555', fontSize: '11px', textDecoration: 'none' }}>
-            github ↗
-          </a>
+          <a href="https://playground.gitlawb.com" target="_blank" rel="noopener" style={{ color: '#555', fontSize: '11px', textDecoration: 'none' }}>playground ↗</a>
+          <a href="https://github.com/GitAxolotl/gitaxolotl" target="_blank" rel="noopener" style={{ color: '#555', fontSize: '11px', textDecoration: 'none' }}>github ↗</a>
         </div>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '1px', background: '#1a1d24', minHeight: 'calc(100vh - 53px)' }}>
-        {/* Main Panel */}
-        <div style={{ background: '#07090d', padding: '24px', overflowY: 'auto' }}>
-          {/* Source Intake */}
-          <section style={{ marginBottom: '32px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-              <GitBranch size={14} color="#555" />
-              <span style={{ color: '#888', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Source Intake</span>
+      <div style={{ display: 'flex', height: 'calc(100vh - 45px)' }}>
+        {/* Canvas (mascot area) */}
+        <div style={{ flex: showAnalysis ? '0 0 45%' : '1', position: 'relative', transition: 'flex 0.3s' }}>
+          <canvas ref={canvasRef} onClick={handleCanvasClick} style={{ width: '100%', height: '100%', cursor: 'crosshair' }} />
+          {/* Scanlines */}
+          <div style={{ position: 'absolute', inset: 0, background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px)', pointerEvents: 'none' }} />
+          {/* Center prompt when no analysis */}
+          {!showAnalysis && (
+            <div style={{ position: 'absolute', bottom: 40, left: '50%', transform: 'translateX(-50%)', textAlign: 'center' }}>
+              <div style={{ color: '#555', fontSize: '11px', marginBottom: 8 }}>click to feed the axolotl</div>
             </div>
+          )}
+        </div>
 
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-              {(['repo', 'site'] as SourceKind[]).map(kind => (
-                <button
-                  key={kind}
-                  onClick={() => { setSourceKind(kind); setInputValue(''); }}
-                  style={{
-                    padding: '6px 14px',
-                    background: sourceKind === kind ? '#1a1d24' : 'transparent',
-                    border: `1px solid ${sourceKind === kind ? '#333' : '#1a1d24'}`,
-                    color: sourceKind === kind ? '#fff' : '#555',
-                    fontSize: '11px',
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    borderRadius: '2px',
-                  }}
+        {/* Analysis Panel */}
+        {showAnalysis && (
+          <div style={{ flex: 1, borderLeft: '1px solid #1a1d24', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Input */}
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1d24' }}>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input value={inputValue} onChange={e => setInputValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && analyze()}
+                  placeholder="owner/repo or GitHub URL"
+                  style={{ flex: 1, padding: '8px 12px', background: '#0d0f14', border: '1px solid #1a1d24', color: '#fff', fontSize: '12px', fontFamily: 'inherit', outline: 'none', borderRadius: '2px' }}
+                />
+                <button onClick={analyze} disabled={isAnalyzing || !inputValue.trim()}
+                  style={{ padding: '8px 16px', background: isAnalyzing ? '#1a1d24' : theme.accent, border: 'none', color: isAnalyzing ? '#555' : '#000', fontSize: '11px', fontWeight: 600, cursor: isAnalyzing ? 'wait' : 'pointer', fontFamily: 'inherit', borderRadius: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}
                 >
-                  {kind === 'repo' ? 'GitHub Repo' : 'Live Site'}
+                  {isAnalyzing ? <Loader2 size={12} className="spin" /> : <Zap size={12} />}
+                  {isAnalyzing ? 'Analyzing...' : 'Analyze'}
                 </button>
-              ))}
-            </div>
-
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input
-                value={inputValue}
-                onChange={e => setInputValue(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && analyzeRepo()}
-                placeholder={sourceKind === 'repo' ? 'owner/repo or GitHub URL' : 'https://example.com'}
-                style={{
-                  flex: 1,
-                  padding: '10px 14px',
-                  background: '#0d0f14',
-                  border: '1px solid #1a1d24',
-                  color: '#fff',
-                  fontSize: '13px',
-                  fontFamily: 'inherit',
-                  outline: 'none',
-                  borderRadius: '2px',
-                }}
-              />
-              <button
-                onClick={analyzeRepo}
-                disabled={isAnalyzing || !inputValue.trim()}
-                style={{
-                  padding: '10px 20px',
-                  background: isAnalyzing ? '#1a1d24' : '#00ff66',
-                  border: 'none',
-                  color: isAnalyzing ? '#555' : '#000',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  cursor: isAnalyzing ? 'wait' : 'pointer',
-                  fontFamily: 'inherit',
-                  borderRadius: '2px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
-              >
-                {isAnalyzing ? <Loader2 size={14} className="spin" /> : <Zap size={14} />}
-                {isAnalyzing ? 'Analyzing...' : 'Analyze'}
-              </button>
-            </div>
-
-            {/* Quick examples */}
-            {!repoData && !isAnalyzing && (
-              <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              </div>
+              {/* Quick examples */}
+              <div style={{ marginTop: '8px', display: 'flex', gap: '6px' }}>
                 {['GitAxolotl/gitaxolotl', 'Gitlawb/openclaude', 'Gitlawb/contracts'].map(ex => (
-                  <button
-                    key={ex}
-                    onClick={() => { setInputValue(ex); }}
-                    style={{
-                      padding: '4px 10px',
-                      background: '#0d0f14',
-                      border: '1px solid #1a1d24',
-                      color: '#555',
-                      fontSize: '10px',
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                      borderRadius: '2px',
-                    }}
-                  >
-                    {ex}
-                  </button>
+                  <button key={ex} onClick={() => setInputValue(ex)} style={{ padding: '3px 8px', background: '#0d0f14', border: '1px solid #1a1d24', color: '#555', fontSize: '10px', cursor: 'pointer', fontFamily: 'inherit', borderRadius: '2px' }}>{ex}</button>
                 ))}
               </div>
-            )}
+              {error && <div style={{ marginTop: '8px', padding: '8px', background: '#1a0002', border: '1px solid #3a0004', color: '#ff5555', fontSize: '11px', borderRadius: '2px' }}>{error}</div>}
+            </div>
 
-            {error && (
-              <div style={{ marginTop: '12px', padding: '10px', background: '#1a0002', border: '1px solid #3a0004', color: '#ff5555', fontSize: '12px', borderRadius: '2px' }}>
-                {error}
-              </div>
-            )}
-          </section>
-
-          {/* Repo Info */}
-          {repoData && (
-            <section style={{ marginBottom: '32px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-                <FileCode size={14} color="#555" />
-                <span style={{ color: '#888', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Repository</span>
-              </div>
-
-              <div style={{ background: '#0d0f14', border: '1px solid #1a1d24', borderRadius: '2px', padding: '20px' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '16px' }}>
-                  <div>
-                    <h2 style={{ color: '#fff', fontSize: '18px', fontWeight: 600, margin: '0 0 6px 0' }}>
-                      {repoData.full_name}
-                    </h2>
-                    <p style={{ color: '#888', fontSize: '12px', margin: 0 }}>{repoData.description}</p>
+            {/* Scrollable content */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+              {/* Repo Info */}
+              {repoData && (
+                <section style={{ marginBottom: '24px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px' }}>
+                    <FileCode size={12} color="#555" />
+                    <span style={{ color: '#888', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Repository</span>
                   </div>
-                  <div style={{ display: 'flex', gap: '16px' }}>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ color: '#ffaa00', fontSize: '16px', fontWeight: 700 }}>{formatNumber(repoData.stars)}</div>
-                      <div style={{ color: '#555', fontSize: '10px' }}>stars</div>
+                  <div style={{ background: '#0d0f14', border: '1px solid #1a1d24', borderRadius: '2px', padding: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                      <div>
+                        <h2 style={{ color: '#fff', fontSize: '15px', fontWeight: 600, margin: '0 0 4px 0' }}>{repoData.full_name}</h2>
+                        <p style={{ color: '#888', fontSize: '11px', margin: 0 }}>{repoData.description}</p>
+                      </div>
+                      <div style={{ display: 'flex', gap: '12px' }}>
+                        <div style={{ textAlign: 'center' }}><div style={{ color: '#ffaa00', fontSize: '14px', fontWeight: 700 }}>{fmt(repoData.stars)}</div><div style={{ color: '#555', fontSize: '9px' }}>stars</div></div>
+                        <div style={{ textAlign: 'center' }}><div style={{ color: '#00bcff', fontSize: '14px', fontWeight: 700 }}>{fmt(repoData.forks)}</div><div style={{ color: '#555', fontSize: '9px' }}>forks</div></div>
+                      </div>
                     </div>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ color: '#00bcff', fontSize: '16px', fontWeight: 700 }}>{formatNumber(repoData.forks)}</div>
-                      <div style={{ color: '#555', fontSize: '10px' }}>forks</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '12px' }}>
+                      {[
+                        { l: 'Language', v: repoData.language }, { l: 'Files', v: repoData.fileCount.toString() },
+                        { l: 'Size', v: repoData.totalLOC > 1000000 ? `${(repoData.totalLOC/1000000).toFixed(1)}MB` : `${(repoData.totalLOC/1000).toFixed(0)}KB` },
+                        { l: 'Branch', v: repoData.defaultBranch },
+                      ].map(s => (
+                        <div key={s.l} style={{ background: '#07090d', padding: '8px', borderRadius: '2px', border: '1px solid #1a1d24' }}>
+                          <div style={{ color: '#555', fontSize: '9px', marginBottom: '2px' }}>{s.l}</div>
+                          <div style={{ color: '#fff', fontSize: '12px', fontWeight: 600 }}>{s.v}</div>
+                        </div>
+                      ))}
                     </div>
+                    {/* Languages */}
+                    {Object.keys(repoData.languages).length > 0 && (
+                      <div>
+                        <div style={{ display: 'flex', height: '3px', borderRadius: '2px', overflow: 'hidden', marginBottom: '6px' }}>
+                          {Object.entries(repoData.languages).sort(([,a],[,b]) => b-a).slice(0,5).map(([lang, bytes], i) => {
+                            const total = Object.values(repoData.languages).reduce((s,v) => s+v, 0);
+                            const colors = [theme.accent, '#00bcff', '#ffaa00', '#ff00cc', '#ff2a2a'];
+                            return <div key={lang} style={{ width: `${(bytes/total)*100}%`, background: colors[i%5] }} />;
+                          })}
+                        </div>
+                        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                          {Object.entries(repoData.languages).sort(([,a],[,b]) => b-a).slice(0,5).map(([lang, bytes], i) => {
+                            const total = Object.values(repoData.languages).reduce((s,v) => s+v, 0);
+                            const colors = [theme.accent, '#00bcff', '#ffaa00', '#ff00cc', '#ff2a2a'];
+                            return <span key={lang} style={{ fontSize: '10px', color: '#888' }}><span style={{ color: colors[i%5] }}>●</span> {lang} {((bytes/total)*100).toFixed(1)}%</span>;
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {repoData.topics.length > 0 && (
+                      <div style={{ marginTop: '10px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                        {repoData.topics.map(t => <span key={t} style={{ padding: '2px 6px', background: '#1a1d24', color: '#00bcff', fontSize: '9px', borderRadius: '2px' }}>{t}</span>)}
+                      </div>
+                    )}
                   </div>
-                </div>
+                </section>
+              )}
 
-                {/* Stats row */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '16px' }}>
-                  {[
-                    { label: 'Language', value: repoData.language },
-                    { label: 'Files', value: repoData.fileCount.toString() },
-                    { label: 'Size', value: formatLOC(repoData.totalLOC) },
-                    { label: 'Branch', value: repoData.defaultBranch },
-                  ].map(stat => (
-                    <div key={stat.label} style={{ background: '#07090d', padding: '10px', borderRadius: '2px', border: '1px solid #1a1d24' }}>
-                      <div style={{ color: '#555', fontSize: '10px', marginBottom: '4px' }}>{stat.label}</div>
-                      <div style={{ color: '#fff', fontSize: '13px', fontWeight: 600 }}>{stat.value}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Languages bar */}
-                {Object.keys(repoData.languages).length > 0 && (
-                  <div>
-                    <div style={{ color: '#555', fontSize: '10px', marginBottom: '6px' }}>Languages</div>
-                    <div style={{ display: 'flex', height: '4px', borderRadius: '2px', overflow: 'hidden', marginBottom: '8px' }}>
-                      {Object.entries(repoData.languages)
-                        .sort(([,a], [,b]) => b - a)
-                        .slice(0, 5)
-                        .map(([lang, bytes], i) => {
-                          const total = Object.values(repoData.languages).reduce((s, v) => s + v, 0);
-                          const pct = (bytes / total) * 100;
-                          const colors = ['#00ff66', '#00bcff', '#ffaa00', '#ff00cc', '#ff2a2a'];
-                          return (
-                            <div key={lang} style={{ width: `${pct}%`, background: colors[i % colors.length] }} title={`${lang}: ${pct.toFixed(1)}%`} />
-                          );
-                        })}
-                    </div>
-                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                      {Object.entries(repoData.languages)
-                        .sort(([,a], [,b]) => b - a)
-                        .slice(0, 5)
-                        .map(([lang, bytes], i) => {
-                          const total = Object.values(repoData.languages).reduce((s, v) => s + v, 0);
-                          const pct = ((bytes / total) * 100).toFixed(1);
-                          const colors = ['#00ff66', '#00bcff', '#ffaa00', '#ff00cc', '#ff2a2a'];
-                          return (
-                            <span key={lang} style={{ fontSize: '10px', color: '#888' }}>
-                              <span style={{ color: colors[i % colors.length] }}>●</span> {lang} {pct}%
-                            </span>
-                          );
-                        })}
-                    </div>
+              {/* Quality Gates */}
+              {qualityGates.length > 0 && (
+                <section style={{ marginBottom: '24px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px' }}>
+                    <Shield size={12} color="#555" />
+                    <span style={{ color: '#888', fontSize: '10px', textTransform: 'uppercase' }}>Quality Gates</span>
+                    <span style={{ marginLeft: 'auto', color: qualityScore >= 70 ? theme.accent : '#ffaa00', fontSize: '13px', fontWeight: 700 }}>{qualityScore}/100</span>
                   </div>
-                )}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
+                    {qualityGates.map(g => {
+                      const Icon = g.icon;
+                      return (
+                        <div key={g.id} style={{ background: '#0d0f14', border: `1px solid ${statusClr(g.status)}22`, borderRadius: '2px', padding: '10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                            <Icon size={11} color={statusClr(g.status)} />
+                            <span style={{ color: '#fff', fontSize: '11px', fontWeight: 600 }}>{g.name}</span>
+                            <span style={{ marginLeft: 'auto', fontSize: '11px', fontWeight: 700, color: statusClr(g.status) }}>{g.score}</span>
+                          </div>
+                          <div style={{ color: '#888', fontSize: '10px' }}>{g.detail}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
 
-                {/* Topics */}
-                {repoData.topics.length > 0 && (
-                  <div style={{ marginTop: '12px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    {repoData.topics.map(topic => (
-                      <span key={topic} style={{ padding: '2px 8px', background: '#1a1d24', color: '#00bcff', fontSize: '10px', borderRadius: '2px' }}>
-                        {topic}
-                      </span>
+              {/* Pipeline */}
+              {pipeline.length > 0 && (
+                <section>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px' }}>
+                    <Activity size={12} color="#555" />
+                    <span style={{ color: '#888', fontSize: '10px', textTransform: 'uppercase' }}>Pipeline</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    {pipeline.map(step => (
+                      <div key={step.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', background: step.status === 'active' ? '#0d1a0d' : '#0d0f14', border: `1px solid ${step.status === 'active' ? theme.accent + '22' : '#1a1d24'}`, borderRadius: '2px' }}>
+                        <span style={{ color: statusClr(step.status), fontSize: '12px', width: '16px', textAlign: 'center' }}>
+                          {step.status === 'done' ? '✓' : step.status === 'active' ? '●' : step.status === 'error' ? '✗' : '○'}
+                        </span>
+                        <span style={{ color: step.status === 'queued' ? '#555' : '#fff', fontSize: '11px', fontWeight: 500, minWidth: '100px' }}>{step.name}</span>
+                        <span style={{ color: '#555', fontSize: '10px', flex: 1 }}>{step.detail}</span>
+                        <span style={{ color: '#444', fontSize: '9px' }}>{step.duration}</span>
+                      </div>
                     ))}
                   </div>
+                </section>
+              )}
+            </div>
+
+            {/* Bottom bar: Activity Log */}
+            <div style={{ borderTop: '1px solid #1a1d24', height: '160px', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '8px 20px 4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Terminal size={11} color="#555" />
+                <span style={{ color: '#555', fontSize: '9px', textTransform: 'uppercase' }}>Activity Log</span>
+                {repoData && (
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
+                    <a href={`https://playground.gitlawb.com`} target="_blank" rel="noopener" style={{ color: theme.accent, fontSize: '10px', textDecoration: 'none' }}>Playground ↗</a>
+                    <a href={`https://github.com/${repoData.full_name}`} target="_blank" rel="noopener" style={{ color: '#888', fontSize: '10px', textDecoration: 'none' }}>GitHub ↗</a>
+                  </div>
                 )}
               </div>
-            </section>
-          )}
-
-          {/* Quality Gates */}
-          {qualityGates.length > 0 && (
-            <section style={{ marginBottom: '32px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-                <Shield size={14} color="#555" />
-                <span style={{ color: '#888', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Quality Gates</span>
-                <span style={{ 
-                  marginLeft: 'auto', 
-                  color: getScoreColor(qualityScore), 
-                  fontSize: '14px', 
-                  fontWeight: 700 
-                }}>
-                  {qualityScore}/100
-                </span>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                {qualityGates.map(gate => {
-                  const Icon = gate.icon;
-                  return (
-                    <div key={gate.id} style={{
-                      background: '#0d0f14',
-                      border: `1px solid ${getStatusColor(gate.status)}22`,
-                      borderRadius: '2px',
-                      padding: '14px',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                        <Icon size={12} color={getStatusColor(gate.status)} />
-                        <span style={{ color: '#fff', fontSize: '12px', fontWeight: 600 }}>{gate.name}</span>
-                        <span style={{ 
-                          marginLeft: 'auto',
-                          width: 8, height: 8, borderRadius: '50%',
-                          background: getStatusColor(gate.status),
-                          boxShadow: `0 0 6px ${getStatusColor(gate.status)}`,
-                        }} />
-                      </div>
-                      <div style={{ color: '#888', fontSize: '11px' }}>{gate.detail}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-
-          {/* Pipeline */}
-          {pipeline.length > 0 && (
-            <section>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-                <Activity size={14} color="#555" />
-                <span style={{ color: '#888', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Pipeline</span>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                {pipeline.map((step) => (
-                  <div key={step.id} style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                    padding: '10px 14px',
-                    background: step.status === 'active' ? '#0d1a0d' : '#0d0f14',
-                    border: `1px solid ${step.status === 'active' ? '#00ff6622' : '#1a1d24'}`,
-                    borderRadius: '2px',
-                  }}>
-                    <span style={{ 
-                      color: getStatusColor(step.status), 
-                      fontSize: '14px',
-                      width: '20px',
-                      textAlign: 'center',
-                    }}>
-                      {step.status === 'done' ? '✓' : step.status === 'active' ? '●' : step.status === 'error' ? '✗' : '○'}
-                    </span>
-                    <span style={{ color: step.status === 'queued' ? '#555' : '#fff', fontSize: '12px', fontWeight: 500, minWidth: '120px' }}>
-                      {step.name}
-                    </span>
-                    <span style={{ color: '#555', fontSize: '11px', flex: 1 }}>{step.detail}</span>
-                    <span style={{ color: '#444', fontSize: '10px' }}>{step.duration}</span>
+              <div ref={logRef} style={{ flex: 1, overflowY: 'auto', padding: '0 20px 8px' }}>
+                {activityLog.length === 0 ? (
+                  <div style={{ color: '#333', fontSize: '10px', fontStyle: 'italic' }}>No activity yet</div>
+                ) : activityLog.map((log, i) => (
+                  <div key={i} style={{ marginBottom: '3px', fontSize: '10px' }}>
+                    <span style={{ color: '#444', marginRight: '6px' }}>{log.time}</span>
+                    <span style={{ color: statusClr(log.type) }}>{log.message}</span>
                   </div>
                 ))}
               </div>
-            </section>
-          )}
-        </div>
-
-        {/* Sidebar */}
-        <div style={{ background: '#0a0c11', borderLeft: '1px solid #1a1d24', display: 'flex', flexDirection: 'column' }}>
-          {/* Score */}
-          {repoData && (
-            <div style={{ padding: '24px', borderBottom: '1px solid #1a1d24', textAlign: 'center' }}>
-              <div style={{ color: '#555', fontSize: '10px', textTransform: 'uppercase', marginBottom: '8px' }}>Quality Score</div>
-              <div style={{ 
-                fontSize: '48px', 
-                fontWeight: 700, 
-                color: getScoreColor(qualityScore),
-                textShadow: `0 0 20px ${getScoreColor(qualityScore)}44`,
-                lineHeight: 1,
-              }}>
-                {qualityScore}
-              </div>
-              <div style={{ color: '#555', fontSize: '11px', marginTop: '4px' }}>/100</div>
-            </div>
-          )}
-
-          {/* Quick Stats */}
-          {repoData && (
-            <div style={{ padding: '16px 24px', borderBottom: '1px solid #1a1d24' }}>
-              <div style={{ color: '#555', fontSize: '10px', textTransform: 'uppercase', marginBottom: '12px' }}>Quick Stats</div>
-              {[
-                { icon: Star, label: 'Stars', value: formatNumber(repoData.stars), color: '#ffaa00' },
-                { icon: GitBranch, label: 'Forks', value: formatNumber(repoData.forks), color: '#00bcff' },
-                { icon: FileCode, label: 'Files', value: repoData.fileCount.toString(), color: '#00ff66' },
-                { icon: Clock, label: 'Updated', value: new Date(repoData.lastUpdated).toLocaleDateString(), color: '#888' },
-              ].map(stat => (
-                <div key={stat.label} style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                  <stat.icon size={12} color={stat.color} />
-                  <span style={{ color: '#555', fontSize: '11px', flex: 1 }}>{stat.label}</span>
-                  <span style={{ color: '#fff', fontSize: '12px', fontWeight: 600 }}>{stat.value}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Handoff */}
-          {repoData && (
-            <div style={{ padding: '16px 24px', borderBottom: '1px solid #1a1d24' }}>
-              <div style={{ color: '#555', fontSize: '10px', textTransform: 'uppercase', marginBottom: '12px' }}>Handoff</div>
-              <a
-                href={`https://playground.gitlawb.com`}
-                target="_blank"
-                rel="noopener"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '10px',
-                  background: '#0d0f14',
-                  border: '1px solid #1a1d24',
-                  color: '#00ff66',
-                  fontSize: '12px',
-                  textDecoration: 'none',
-                  borderRadius: '2px',
-                  marginBottom: '8px',
-                }}
-              >
-                <ExternalLink size={12} />
-                Open in Playground
-              </a>
-              <a
-                href={`https://github.com/${repoData.full_name}`}
-                target="_blank"
-                rel="noopener"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '10px',
-                  background: '#0d0f14',
-                  border: '1px solid #1a1d24',
-                  color: '#888',
-                  fontSize: '12px',
-                  textDecoration: 'none',
-                  borderRadius: '2px',
-                }}
-              >
-                <ExternalLink size={12} />
-                View on GitHub
-              </a>
-            </div>
-          )}
-
-          {/* Activity Log */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ padding: '16px 24px 8px' }}>
-              <div style={{ color: '#555', fontSize: '10px', textTransform: 'uppercase' }}>Activity Log</div>
-            </div>
-            <div ref={logRef} style={{ flex: 1, overflowY: 'auto', padding: '0 24px 24px' }}>
-              {activityLog.length === 0 ? (
-                <div style={{ color: '#333', fontSize: '11px', fontStyle: 'italic' }}>No activity yet</div>
-              ) : (
-                activityLog.map((log, i) => (
-                  <div key={i} style={{ marginBottom: '6px', fontSize: '11px' }}>
-                    <span style={{ color: '#444', marginRight: '8px' }}>{log.time}</span>
-                    <span style={{ color: getStatusColor(log.type) }}>{log.message}</span>
-                  </div>
-                ))
-              )}
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       <style>{`
@@ -970,6 +810,9 @@ export default function App() {
         .spin { animation: spin 1s linear infinite; }
         input::placeholder { color: #333; }
         input:focus { border-color: #333 !important; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #0a0c11; }
+        ::-webkit-scrollbar-thumb { background: #1a1d24; border-radius: 2px; }
       `}</style>
     </div>
   );
