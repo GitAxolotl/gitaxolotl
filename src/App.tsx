@@ -1,1159 +1,745 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type FormEvent,
-  type RefObject,
-} from "react";
-
-/* React 19 unwraps Promises from useEffect cleanup correctly; AbortSignal
-   here is just a defensive guard for fast-typers. */
+import { useEffect, useState, useCallback } from "react";
 
 /* ============================================================
-   GitAxolotl — builder control room
-   A calm, restrained surface for turning a GitHub repository or a
-   live website into a playground-ready app. No marketing slop, no
-   filler animation, no generic "AI dashboard" energy.
+   GitAxolotl — Builder Control Room
+   Fetches real data from GitHub API. Pure CSS, no Tailwind.
    ============================================================ */
 
-type SourceKind = "repo" | "site";
+// ── Types ──────────────────────────────────────────────────
 
-type SourceProfile = {
-  title: string;
-  subtitle: string;
-  language: string;
-  stars: string;
-  files: number;
-  routes: number;
-  pages: string[];
-  signals: string[];
-};
-
-type StepStatus = "done" | "active" | "queued";
-
-type PipelineStep = {
-  id: string;
-  title: string;
-  status: StepStatus;
-  detail: string;
-  duration: string;
-};
-
-type Gate = {
-  id: string;
-  title: string;
-  owner: string;
-  score: number;
-  state: "passed" | "review" | "queued";
-  detail: string;
-  evidence: string[];
-};
-
-type Agent = {
+interface RepoData {
   name: string;
-  role: string;
-  focus: string;
-  load: number;
-};
-
-type AuditRow = {
-  time: string;
-  source: string;
-  message: string;
-};
-
-type BriefDecisionKind = "keep" | "cut" | "rename";
-
-type BriefDecision = {
-  kind: BriefDecisionKind;
-  text: string;
-};
-
-type Brief = {
-  title: string;
-  summary: string;
-  wordCount: number;
-  generatedInMs: number;
-  decisions: BriefDecision[];
-  componentsPlanned: number;
-};
-
-type BriefState =
-  | { status: "idle" }
-  | { status: "generating"; startedAt: number }
-  | { status: "ready"; brief: Brief };
-
-const SOURCE_EXAMPLES: Record<SourceKind, string[]> = {
-  repo: [
-    "GitAxolotl/gitaxolotl",
-    "GitLawB/playground",
-    "https://github.com/GitAxolotl/openclaude",
-  ],
-  site: [
-    "https://playground.gitlawb.com",
-    "https://docs.gitlawb.com",
-    "https://gitlawb.com",
-  ],
-};
-
-const REPO_PROFILE: SourceProfile = {
-  title: "GitAxolotl / gitaxolotl",
-  subtitle: "Builder control room • main",
-  language: "TypeScript",
-  stars: "1.2k",
-  files: 38,
-  routes: 6,
-  pages: ["index.html", "src/App.tsx", "src/index.css", "public/favicon.svg"],
-  signals: [
-    "Vite + React 19 + TypeScript",
-    "Single-file app — easy to port to playground",
-    "ESLint clean, no unused dependencies",
-  ],
-};
-
-const SITE_PROFILE: SourceProfile = {
-  title: "playground.gitlawb.com",
-  subtitle: "Live site • production",
-  language: "Static + React",
-  stars: "—",
-  files: 12,
-  routes: 4,
-  pages: ["/", "/projects", "/apps", "/publish"],
-  signals: [
-    "Hero, examples list, preview panel",
-    "Sign-in flow (X / Twitter)",
-    "Publish + projects pages share the same shell",
-  ],
-};
-
-const PIPELINE: PipelineStep[] = [
-  {
-    id: "intake",
-    title: "Intake",
-    status: "done",
-    detail:
-      "Read the repository tree or crawl the live site. Capture pages, copy, and intent — not screenshots.",
-    duration: "00:12",
-  },
-  {
-    id: "brief",
-    title: "Brief",
-    status: "done",
-    detail:
-      "Summarise the product into one tight app brief. Decide what stays, what gets cut, what gets renamed.",
-    duration: "00:28",
-  },
-  {
-    id: "build",
-    title: "Build",
-    status: "active",
-    detail:
-      "Generate React components, restrained CSS, and real interaction states. No template hero sections.",
-    duration: "01:14",
-  },
-  {
-    id: "verify",
-    title: "Verify",
-    status: "queued",
-    detail:
-      "Lint, type-check, accessibility pass, responsive sweep, and a publish checklist before handoff.",
-    duration: "00:31",
-  },
-];
-
-const GATES: Gate[] = [
-  {
-    id: "structure",
-    title: "Source structure mapped",
-    owner: "Indexer",
-    score: 98,
-    state: "passed",
-    detail:
-      "Routes, assets, and copy blocks are extracted before generation, so the build agent never works blind.",
-    evidence: [
-      "38 source files indexed",
-      "6 routes resolved",
-      "0 orphan assets",
-    ],
-  },
-  {
-    id: "design",
-    title: "Design system locked",
-    owner: "Interface",
-    score: 95,
-    state: "passed",
-    detail:
-      "Spacing, type scale, and surfaces are pinned to a small set of tokens — restraint over decoration.",
-    evidence: [
-      "1 type scale, 1 surface scale",
-      "Contrast ≥ 4.5:1 on body text",
-      "Focus rings on every interactive element",
-    ],
-  },
-  {
-    id: "react",
-    title: "React conversion verified",
-    owner: "Compiler",
-    score: 92,
-    state: "review",
-    detail:
-      "Components are split by intent. Local state is local. Generated UI is reviewed for one-off template sludge.",
-    evidence: [
-      "12 components, no leaked any",
-      "Strict mode safe",
-      "Zero runtime deps beyond React",
-    ],
-  },
-  {
-    id: "publish",
-    title: "Publish handoff",
-    owner: "Release",
-    score: 88,
-    state: "queued",
-    detail:
-      "Preview metadata, cache headers, and deploy notes are prepared so the playground or Vercel build is boring.",
-    evidence: [
-      "vercel.json present",
-      "Long-cache headers on /assets",
-      "SPA fallback configured",
-    ],
-  },
-];
-
-const AGENTS: Agent[] = [
-  { name: "AXO", role: "Editor", focus: "Keeps scope sharp", load: 42 },
-  { name: "FORGE", role: "Build engineer", focus: "Hardens output", load: 63 },
-  { name: "CIPHER", role: "Trust reviewer", focus: "Checks risk", load: 34 },
-  { name: "NEXUS", role: "Publisher", focus: "Ships clean", load: 51 },
-];
-
-const AUDIT: AuditRow[] = [
-  { time: "12:04:11", source: "Indexer", message: "Source structure mapped — 38 files, 6 routes." },
-  { time: "12:04:32", source: "Editor", message: "App brief locked at 184 words." },
-  { time: "12:05:09", source: "Compiler", message: "12 components emitted, strict mode safe." },
-  { time: "12:05:41", source: "Reviewer", message: "Contrast and focus pass on all surfaces." },
-  { time: "12:06:02", source: "Release", message: "Publish handoff queued. Awaiting human review." },
-];
-
-/* -------------------- helpers -------------------- */
-
-function classNames(...parts: Array<string | false | null | undefined>): string {
-  return parts.filter(Boolean).join(" ");
+  full_name: string;
+  description: string;
+  stargazers_count: number;
+  forks_count: number;
+  open_issues_count: number;
+  language: string;
+  default_branch: string;
+  created_at: string;
+  updated_at: string;
+  pushed_at: string;
+  license: { spdx_id: string } | null;
+  topics: string[];
+  size: number;
+  private: boolean;
 }
 
-function normalizeSource(kind: SourceKind, raw: string): string {
-  const value = raw.trim();
-  if (!value) return kind === "repo" ? "GitAxolotl/gitaxolotl" : "https://playground.gitlawb.com";
-  if (kind === "site" && !/^https?:\/\//i.test(value)) return `https://${value}`;
-  if (kind === "repo" && value.startsWith("git@github.com:")) {
-    return value.replace("git@github.com:", "").replace(/\.git$/, "");
-  }
-  if (kind === "repo" && /^https?:\/\/github\.com\//i.test(value)) {
-    return value.replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/, "");
-  }
-  return value;
-}
-
-function statusLabel(state: Gate["state"]): string {
-  if (state === "passed") return "Passed";
-  if (state === "review") return "In review";
-  return "Queued";
-}
-
-function stepStatusLabel(status: StepStatus): string {
-  if (status === "done") return "Done";
-  if (status === "active") return "Running";
-  return "Queued";
-}
-
-/* Deterministic brief synthesis. Same input -> same output. No LLM, no
-   pretend streaming — just a tight summary the eye can scan. */
-function buildBrief(kind: SourceKind, resolved: string): Brief {
-  const isRepo = kind === "repo";
-  const profile = isRepo ? REPO_PROFILE : SITE_PROFILE;
-  const label = isRepo ? "repository" : "live site";
-  const summary = isRepo
-    ? `A Vite + React + TypeScript ${label} at ${resolved}. Ship the same shell as a calm builder control room — keep source intake, pipeline, and quality gates. Drop dashboard slop. Single primary action, four named gates, one publish handoff.`
-    : `A multi-page ${label} at ${resolved}. Reduce to one builder shell with a single primary action ("Configure source"), one source-preview panel, four named gates, and a publish handoff. No marketing hero, no carousel.`;
-  const decisions: BriefDecision[] = isRepo
-    ? [
-        { kind: "keep", text: "Single-file React shell, quality gates, pipeline." },
-        { kind: "cut", text: "Decorative animations and emoji rain." },
-        { kind: "rename", text: '"Healing dashboard" → "Builder control room".' },
-      ]
-    : [
-        { kind: "keep", text: "Source intake, examples list, owner ribbons." },
-        { kind: "cut", text: "Hero carousel and partner logos." },
-        { kind: "rename", text: '"Try our AI" → "Generate brief".' },
-      ];
-  return {
-    title: `App brief — ${profile.title}`,
-    summary,
-    wordCount: summary.split(/\s+/).filter(Boolean).length,
-    generatedInMs: isRepo ? 920 : 1180,
-    decisions,
-    componentsPlanned: isRepo ? 12 : 9,
-  };
-}
-
-function decisionLabel(kind: BriefDecisionKind): string {
-  if (kind === "keep") return "Keep";
-  if (kind === "cut") return "Cut";
-  return "Rename";
-}
-
-/* -------------------- mascot -------------------- */
-
-/**
- * Axolotl mascot — single-color, geometric line + soft fill silhouette.
- * Designed to read as confident and clean at any size: 24px favicon up to
- * 220px hero figure. No cartoon eyes, no gradients per limb, no "AI 3D blob".
- */
-function AxolotlMascot({
-  size = 220,
-  decorative = true,
-}: {
+interface TreeNode {
+  path: string;
+  mode: string;
+  type: string;
+  sha: string;
   size?: number;
-  decorative?: boolean;
-}) {
-  const accent = "#c8f284";
-  return (
-    <svg
-      className="mascot-svg"
-      width={size}
-      height={size}
-      viewBox="0 0 200 200"
-      role={decorative ? undefined : "img"}
-      aria-label={decorative ? undefined : "GitAxolotl mascot"}
-      aria-hidden={decorative ? "true" : undefined}
-    >
-      <defs>
-        <linearGradient id="mascot-body" x1="30%" y1="10%" x2="70%" y2="100%">
-          <stop offset="0%" stopColor="#1f2a37" />
-          <stop offset="100%" stopColor="#0d1218" />
-        </linearGradient>
-        <radialGradient id="mascot-cheek" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor={accent} stopOpacity="0.55" />
-          <stop offset="100%" stopColor={accent} stopOpacity="0" />
-        </radialGradient>
-      </defs>
-
-      {/* Soft halo */}
-      <circle cx="100" cy="100" r="82" fill="url(#mascot-cheek)" opacity="0.45" />
-
-      {/* Tail */}
-      <path
-        d="M100 160 C 96 178, 84 188, 70 188 C 86 178, 92 168, 96 158 Z"
-        fill="url(#mascot-body)"
-        stroke={accent}
-        strokeOpacity="0.4"
-        strokeWidth="1"
-      />
-
-      {/* Body */}
-      <path
-        d="M60 110 C 60 78, 78 60, 100 60 C 122 60, 140 78, 140 110 C 140 140, 124 162, 100 162 C 76 162, 60 140, 60 110 Z"
-        fill="url(#mascot-body)"
-        stroke={accent}
-        strokeOpacity="0.6"
-        strokeWidth="1.4"
-      />
-
-      {/* Belly highlight */}
-      <path
-        d="M82 118 C 84 138, 92 152, 100 152 C 108 152, 116 138, 118 118 C 116 130, 108 140, 100 140 C 92 140, 84 130, 82 118 Z"
-        fill={accent}
-        opacity="0.07"
-      />
-
-      {/* Outer gill plumes (3 each side) */}
-      <g fill="none" stroke={accent} strokeWidth="1.4" strokeLinecap="round" opacity="0.85">
-        <path d="M64 84 C 50 80, 40 70, 38 56" />
-        <path d="M62 92 C 44 92, 30 86, 24 74" />
-        <path d="M62 100 C 44 104, 30 104, 22 96" />
-        <path d="M136 84 C 150 80, 160 70, 162 56" />
-        <path d="M138 92 C 156 92, 170 86, 176 74" />
-        <path d="M138 100 C 156 104, 170 104, 178 96" />
-      </g>
-
-      {/* Gill tips */}
-      <g fill={accent} opacity="0.9">
-        <circle cx="38" cy="56" r="2.4" />
-        <circle cx="24" cy="74" r="2.4" />
-        <circle cx="22" cy="96" r="2.4" />
-        <circle cx="162" cy="56" r="2.4" />
-        <circle cx="176" cy="74" r="2.4" />
-        <circle cx="178" cy="96" r="2.4" />
-      </g>
-
-      {/* Head crown */}
-      <path
-        d="M70 78 C 80 64, 120 64, 130 78"
-        fill="none"
-        stroke={accent}
-        strokeOpacity="0.45"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-      />
-
-      {/* Eyes */}
-      <g fill="#e7ecf3">
-        <circle cx="86" cy="104" r="3.2" />
-        <circle cx="114" cy="104" r="3.2" />
-      </g>
-      <g fill={accent}>
-        <circle cx="87.2" cy="103" r="1.1" />
-        <circle cx="115.2" cy="103" r="1.1" />
-      </g>
-
-      {/* Cheek dots */}
-      <g fill={accent} opacity="0.5">
-        <circle cx="76" cy="118" r="2.4" />
-        <circle cx="124" cy="118" r="2.4" />
-      </g>
-
-      {/* Smile */}
-      <path
-        d="M92 124 C 96 130, 104 130, 108 124"
-        fill="none"
-        stroke="#e7ecf3"
-        strokeOpacity="0.7"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-
-      {/* Foreground sparks */}
-      <g fill={accent} opacity="0.7">
-        <circle cx="154" cy="40" r="1.6" />
-        <circle cx="46" cy="38" r="1.2" />
-      </g>
-    </svg>
-  );
 }
 
-/* -------------------- header -------------------- */
-
-function Topbar({
-  kind,
-  source,
-}: {
-  kind: SourceKind;
-  source: string;
-}) {
-  return (
-    <header className="topbar" role="banner">
-      <a className="brand" href="#top" aria-label="GitAxolotl home">
-        <span className="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
-            <path
-              d="M16 6 C 10 6, 6 11, 6 17 C 6 23, 10 26, 16 26 C 22 26, 26 23, 26 17 C 26 11, 22 6, 16 6 Z"
-              fill="currentColor"
-              opacity="0.16"
-            />
-            <path
-              d="M16 6 C 10 6, 6 11, 6 17 C 6 23, 10 26, 16 26 C 22 26, 26 23, 26 17 C 26 11, 22 6, 16 6 Z"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              fill="none"
-            />
-            <path d="M7 11 C 4 10, 2.5 7.5, 2.5 5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-            <path d="M6.5 16 C 3 16, 1 14, 0.5 12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-            <path d="M25 11 C 28 10, 29.5 7.5, 29.5 5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-            <path d="M25.5 16 C 29 16, 31 14, 31.5 12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-            <circle cx="13" cy="17.5" r="1.3" fill="currentColor" />
-            <circle cx="19" cy="17.5" r="1.3" fill="currentColor" />
-            <path d="M14 21 C 15 22.4, 17 22.4, 18 21" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" fill="none" />
-          </svg>
-        </span>
-        <span className="brand-text">
-          <strong>GitAxolotl</strong>
-          <small>Builder Control Room</small>
-        </span>
-      </a>
-
-      <nav className="topbar-nav" aria-label="Primary navigation">
-        <a href="#builder">Builder</a>
-        <a href="#pipeline">Pipeline</a>
-        <a href="#quality">Quality</a>
-        <a href="#handoff">Handoff</a>
-      </nav>
-
-      <div className="topbar-source" aria-live="polite">
-        <span className={classNames("dot", kind)} aria-hidden="true" />
-        <span className="topbar-source-kind">{kind === "repo" ? "Repo" : "Site"}</span>
-        <span className="topbar-source-value" title={source}>{source}</span>
-      </div>
-
-      <a
-        className="topbar-cta"
-        href="https://playground.gitlawb.com/"
-        target="_blank"
-        rel="noreferrer"
-      >
-        Open playground
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          <path d="M5 3h8v8" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M13 3 5 11" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </a>
-    </header>
-  );
+interface TreeData {
+  tree: TreeNode[];
+  truncated: boolean;
 }
 
-/* -------------------- hero -------------------- */
-
-function Hero({
-  profile,
-  onJumpToBuilder,
-}: {
-  profile: SourceProfile;
-  onJumpToBuilder: () => void;
-}) {
-  return (
-    <section className="hero" id="top" aria-labelledby="hero-title">
-      <div className="hero-copy">
-        <p className="eyebrow">GitLawB hosted app builder</p>
-        <h1 id="hero-title">
-          Import a repository or a live website. Ship a calm, premium app — not another template.
-        </h1>
-        <p className="hero-lede">
-          GitAxolotl is a small command room for the GitLawB playground. Point it at a GitHub repo
-          or a real URL, watch the brief, build, and quality gates resolve, then publish when it
-          looks like something a human would defend.
-        </p>
-        <div className="hero-actions">
-          <button type="button" className="primary-action" onClick={onJumpToBuilder}>
-            Configure source
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-              <path d="M3 8h10" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" />
-              <path d="M9 4l4 4-4 4" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-          <a className="secondary-action" href="#quality">
-            See quality gates
-          </a>
-        </div>
-        <dl className="hero-meta">
-          <div>
-            <dt>Routes detected</dt>
-            <dd>{profile.routes}</dd>
-          </div>
-          <div>
-            <dt>Files indexed</dt>
-            <dd>{profile.files}</dd>
-          </div>
-          <div>
-            <dt>Primary stack</dt>
-            <dd>{profile.language}</dd>
-          </div>
-        </dl>
-      </div>
-
-      <aside className="hero-panel" aria-label="Build readiness snapshot">
-        <figure className="mascot-figure" aria-hidden="true">
-          <AxolotlMascot size={148} />
-          <figcaption>
-            <span className="eyebrow muted">Mascot</span>
-            <strong>Axo</strong>
-            <small>Quiet editor. Reads the brief before anyone types.</small>
-          </figcaption>
-        </figure>
-        <div className="hero-panel-head">
-          <div>
-            <p className="eyebrow muted">Build readiness</p>
-            <h2>Calm by construction</h2>
-          </div>
-          <span className="badge">no blocking issues</span>
-        </div>
-        <div className="hero-stats">
-          <article>
-            <span>Readiness</span>
-            <strong>97%</strong>
-            <small>Sign-in &amp; publish wired</small>
-          </article>
-          <article>
-            <span>Bundle</span>
-            <strong>68 KB</strong>
-            <small>Gzipped shell</small>
-          </article>
-          <article>
-            <span>Gates</span>
-            <strong>4 / 4</strong>
-            <small>Owners assigned</small>
-          </article>
-          <article>
-            <span>First paint</span>
-            <strong>0.8s</strong>
-            <small>Target on 4G mobile</small>
-          </article>
-        </div>
-      </aside>
-    </section>
-  );
+interface AppState {
+  repo: RepoData | null;
+  tree: TreeData | null;
+  loading: boolean;
+  error: string | null;
 }
 
-/* -------------------- builder -------------------- */
+// ── Constants ──────────────────────────────────────────────
 
-function Builder({
-  kind,
-  setKind,
-  value,
-  setValue,
-  resolved,
-  profile,
-  briefState,
-  onSubmit,
-  onReset,
-  inputRef,
-}: {
-  kind: SourceKind;
-  setKind: (k: SourceKind) => void;
-  value: string;
-  setValue: (v: string) => void;
-  resolved: string;
-  profile: SourceProfile;
-  briefState: BriefState;
-  onSubmit: () => void;
-  onReset: () => void;
-  inputRef: RefObject<HTMLInputElement | null>;
-}) {
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    onSubmit();
+const REPO_API = "https://api.github.com/repos/GitAxolotl/gitaxolotl";
+const TREE_API =
+  "https://api.github.com/repos/GitAxolotl/gitaxolotl/git/trees/main?recursive=1";
+
+const ASCII_AXOLOTL = `
+          ╭──────────────────────────╮
+         ╱    ╭──╮      ╭──╮         ╲
+        │   ╭─╯● ╰─╮╭──╯● ╰─╮        │
+        │   │  ╰──╯ ││  ╰──╯ │        │
+        │   ╰───────╯╰───────╯        │
+        │        ╭────────╮            │
+        │        │ ◠    ◠ │            │
+        │        ╰────────╯            │
+        ╰──╮  ╭────────────╮  ╭──────╯
+            ╰──╯            ╰──╯
+   ╭──────────────────────────────────────╮
+   │     G I T A X O L O T L             │
+   │     Builder Control Room             │
+   ╰──────────────────────────────────────╯`.trim();
+
+// ── Helpers ────────────────────────────────────────────────
+
+function countFilesByExtension(tree: TreeNode[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const node of tree) {
+    if (node.type !== "blob") continue;
+    const ext = node.path.includes(".")
+      ? "." + node.path.split(".").pop()!.toLowerCase()
+      : "(no ext)";
+    counts[ext] = (counts[ext] || 0) + 1;
+  }
+  return counts;
+}
+
+function getLanguageFromExt(ext: string): string {
+  const map: Record<string, string> = {
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript (React)",
+    ".js": "JavaScript",
+    ".jsx": "JavaScript (React)",
+    ".css": "CSS",
+    ".scss": "SCSS",
+    ".html": "HTML",
+    ".json": "JSON",
+    ".md": "Markdown",
+    ".yml": "YAML",
+    ".yaml": "YAML",
+    ".svg": "SVG",
+    ".png": "PNG",
+    ".jpg": "JPEG",
+    ".ico": "ICO",
+    ".gitignore": "Git Config",
+    ".env": "Environment",
+    ".txt": "Text",
   };
-  const generating = briefState.status === "generating";
-  const ready = briefState.status === "ready";
-  const submitLabel = generating
-    ? "Generating…"
-    : ready
-      ? "Regenerate brief"
-      : "Generate brief";
-
-  return (
-    <section className="builder" id="builder" aria-labelledby="builder-title">
-      <div className="section-heading">
-        <p className="eyebrow">Source intake</p>
-        <h2 id="builder-title">
-          One input. Two intents. Repository, or a live website you want recreated as an app.
-        </h2>
-      </div>
-
-      <div className="builder-layout">
-        <form className="builder-form" onSubmit={handleSubmit}>
-          <div className="mode-switch" role="group" aria-label="Choose source type">
-            {(["repo", "site"] as SourceKind[]).map((option) => (
-              <button
-                key={option}
-                type="button"
-                aria-pressed={kind === option}
-                className={classNames("mode-button", kind === option && "active")}
-                onClick={() => {
-                  setKind(option);
-                  setValue(SOURCE_EXAMPLES[option][0]);
-                  inputRef.current?.focus();
-                }}
-              >
-                {option === "repo" ? "GitHub repository" : "Live website"}
-              </button>
-            ))}
-          </div>
-
-          <label className="source-field">
-            <span>{kind === "repo" ? "Repository" : "Website URL"}</span>
-            <input
-              ref={inputRef}
-              value={value}
-              onChange={(event) => setValue(event.target.value)}
-              placeholder={kind === "repo" ? "owner/repo or GitHub URL" : "https://your-site.com"}
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
-              inputMode="url"
-            />
-          </label>
-
-          <ul className="example-row" aria-label="Example sources">
-            {SOURCE_EXAMPLES[kind].map((example) => (
-              <li key={example}>
-                <button type="button" onClick={() => setValue(example)}>
-                  {example}
-                </button>
-              </li>
-            ))}
-          </ul>
-
-          <div className="builder-actions">
-            <button
-              type="submit"
-              className="primary-action"
-              disabled={generating}
-              aria-busy={generating}
-            >
-              {submitLabel}
-            </button>
-            <span className="resolved" aria-live="polite">
-              Resolved as <strong>{resolved}</strong>
-            </span>
-          </div>
-        </form>
-
-        {ready ? (
-          <BriefPanel brief={briefState.brief} onReset={onReset} />
-        ) : (
-          <article
-            className={classNames("source-card", generating && "is-generating")}
-            aria-label="Source preview"
-            aria-busy={generating}
-          >
-            <header>
-              <div>
-                <p className="eyebrow muted">{profile.subtitle}</p>
-                <h3>{profile.title}</h3>
-              </div>
-              <span className="badge subtle">{profile.language}</span>
-            </header>
-
-            <ul className="source-pages">
-              {profile.pages.map((page) => (
-                <li key={page}>
-                  <span className="page-bullet" aria-hidden="true" />
-                  <code>{page}</code>
-                </li>
-              ))}
-            </ul>
-
-            <footer>
-              <ul className="source-signals">
-                {profile.signals.map((signal) => (
-                  <li key={signal}>{signal}</li>
-                ))}
-              </ul>
-              {generating && (
-                <p className="source-generating" aria-live="polite">
-                  <span className="dot-pulse" aria-hidden="true" />
-                  Reading {profile.files} files, {profile.routes} routes…
-                </p>
-              )}
-            </footer>
-          </article>
-        )}
-      </div>
-    </section>
-  );
+  return map[ext] || ext.replace(".", "").toUpperCase();
 }
 
-function BriefPanel({ brief, onReset }: { brief: Brief; onReset: () => void }) {
-  return (
-    <article className="brief-panel" aria-label="Generated brief">
-      <header>
-        <p className="eyebrow muted">App brief</p>
-        <h3>{brief.title}</h3>
-        <button type="button" className="brief-reset" onClick={onReset}>
-          Reset
-        </button>
-      </header>
-      <p className="brief-summary">{brief.summary}</p>
-      <ul className="brief-decisions" aria-label="Decisions">
-        {brief.decisions.map((decision) => (
-          <li key={decision.kind} className={decision.kind}>
-            <span className="brief-decision-tag">{decisionLabel(decision.kind)}</span>
-            <span>{decision.text}</span>
-          </li>
-        ))}
-      </ul>
-      <footer className="brief-meta">
-        <span>{brief.wordCount} words</span>
-        <span aria-hidden="true">·</span>
-        <span>{(brief.generatedInMs / 1000).toFixed(2)}s</span>
-        <span aria-hidden="true">·</span>
-        <span>{brief.componentsPlanned} components planned</span>
-      </footer>
-    </article>
-  );
-}
+function buildFileTree(
+  nodes: TreeNode[]
+): Array<{ name: string; depth: number; isDir: boolean; ext: string }> {
+  // Show top-level + first level of depth
+  const result: Array<{
+    name: string;
+    depth: number;
+    isDir: boolean;
+    ext: string;
+  }> = [];
+  const topLevel = new Map<
+    string,
+    { isDir: boolean; children: number }
+  >();
 
-/* -------------------- pipeline -------------------- */
-
-function Pipeline() {
-  return (
-    <section className="section pipeline" id="pipeline" aria-labelledby="pipeline-title">
-      <div className="section-heading">
-        <p className="eyebrow">Pipeline</p>
-        <h2 id="pipeline-title">
-          Few steps. Clear owner per step. Nothing happens off-screen.
-        </h2>
-      </div>
-      <ol className="pipeline-grid" role="list">
-        {PIPELINE.map((step, index) => (
-          <li
-            key={step.id}
-            className={classNames("pipeline-card", step.status)}
-            aria-current={step.status === "active" ? "step" : undefined}
-          >
-            <div className="pipeline-card-head">
-              <span className="step-index">0{index + 1}</span>
-              <span className={classNames("pill", step.status)}>{stepStatusLabel(step.status)}</span>
-            </div>
-            <h3>{step.title}</h3>
-            <p>{step.detail}</p>
-            <footer>
-              <span>{step.duration}</span>
-              {step.status !== "queued" && (
-                <span className="meter" aria-hidden="true">
-                  <i style={{ width: step.status === "done" ? "100%" : "62%" }} />
-                </span>
-              )}
-            </footer>
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
-
-/* -------------------- quality gates -------------------- */
-
-function Quality() {
-  const [activeId, setActiveId] = useState<string>(GATES[0].id);
-  const active = useMemo(() => GATES.find((gate) => gate.id === activeId) ?? GATES[0], [activeId]);
-
-  return (
-    <section className="section quality" id="quality" aria-labelledby="quality-title">
-      <div className="section-heading">
-        <p className="eyebrow">Quality control</p>
-        <h2 id="quality-title">
-          Every surface has a named owner and a visible reason to pass.
-        </h2>
-      </div>
-
-      <div className="quality-layout">
-        <ul className="gate-list" aria-label="Quality gates">
-          {GATES.map((gate) => {
-            const selected = gate.id === active.id;
-            return (
-              <li key={gate.id}>
-                <button
-                  type="button"
-                  aria-pressed={selected}
-                  aria-controls="gate-detail"
-                  className={classNames("gate-row", selected && "active", gate.state)}
-                  onClick={() => setActiveId(gate.id)}
-                >
-                  <span className={classNames("status-dot", gate.state)} aria-hidden="true" />
-                  <span className="gate-row-body">
-                    <strong>{gate.title}</strong>
-                    <small>
-                      {gate.owner} · {statusLabel(gate.state)}
-                    </small>
-                  </span>
-                  <span className="gate-score">{gate.score}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-
-        <article className="gate-detail" id="gate-detail" aria-live="polite">
-          <div
-            className={classNames("score-ring", active.state)}
-            style={{ "--score": `${active.score}%` } as CSSProperties}
-            aria-hidden="true"
-          >
-            <span>{active.score}</span>
-          </div>
-          <div className="gate-detail-body">
-            <p className="eyebrow muted">{active.owner}</p>
-            <h3>{active.title}</h3>
-            <p>{active.detail}</p>
-            <ul className="evidence" aria-label="Evidence">
-              {active.evidence.map((item) => (
-                <li key={item}>
-                  <span aria-hidden="true">✓</span>
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </article>
-      </div>
-    </section>
-  );
-}
-
-/* -------------------- agents -------------------- */
-
-function shouldRevealImmediately(): boolean {
-  if (typeof IntersectionObserver === "undefined") return true;
-  if (typeof window === "undefined") return true;
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
-function Crew() {
-  const sectionRef = useRef<HTMLElement>(null);
-  const [revealed, setRevealed] = useState<boolean>(() => shouldRevealImmediately());
-
-  useEffect(() => {
-    if (revealed) return;
-    const node = sectionRef.current;
-    if (!node) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setRevealed(true);
-            observer.disconnect();
-            break;
-          }
-        }
-      },
-      { threshold: 0.35 },
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [revealed]);
-
-  return (
-    <section ref={sectionRef} className="section crew" aria-labelledby="crew-title">
-      <div className="section-heading compact">
-        <p className="eyebrow">Builder crew</p>
-        <h2 id="crew-title">Agents with specific jobs. No vague magic.</h2>
-      </div>
-      <div className="agent-grid">
-        {AGENTS.map((agent) => (
-          <AgentCard key={agent.name} agent={agent} revealed={revealed} />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function AgentCard({ agent, revealed }: { agent: Agent; revealed: boolean }) {
-  const [display, setDisplay] = useState(0);
-
-  useEffect(() => {
-    if (!revealed) return;
-    const duration = 720;
-    const start = performance.now();
-    const from = 0;
-    const to = agent.load;
-    let raf = 0;
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 3);
-      setDisplay(Math.round(from + (to - from) * eased));
-      if (t < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [revealed, agent.load]);
-
-  return (
-    <article className="agent-card">
-      <div
-        className="agent-load"
-        style={{ "--load": `${revealed ? agent.load : 0}%` } as CSSProperties}
-        aria-hidden="true"
-      >
-        <span>{display}</span>
-      </div>
-      <header>
-        <h3>{agent.name}</h3>
-        <p>{agent.role}</p>
-      </header>
-      <footer>{agent.focus}</footer>
-    </article>
-  );
-}
-
-/* -------------------- audit log -------------------- */
-
-function Audit() {
-  return (
-    <section className="section audit" aria-labelledby="audit-title">
-      <div className="section-heading compact">
-        <p className="eyebrow">Activity</p>
-        <h2 id="audit-title">A short, honest log. No emoji rain, no fake streaming.</h2>
-      </div>
-      <ul className="audit-list">
-        {AUDIT.map((row) => (
-          <li key={row.time}>
-            <span className="audit-time">{row.time}</span>
-            <span className="audit-source">{row.source}</span>
-            <span className="audit-message">{row.message}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-/* -------------------- handoff -------------------- */
-
-function Handoff() {
-  return (
-    <section className="section handoff" id="handoff" aria-labelledby="handoff-title">
-      <div>
-        <p className="eyebrow">Handoff</p>
-        <h2 id="handoff-title">
-          Same shell, two destinations: GitHub for review, playground for publish.
-        </h2>
-        <p>
-          The repository stays clean — Vite, React, TypeScript, no extra runtime deps. Once you sign
-          into the playground with X, the same app can be lifted there without rewriting.
-        </p>
-        <div className="handoff-actions">
-          <a className="primary-action" href="https://playground.gitlawb.com/" target="_blank" rel="noreferrer">
-            Open hosted playground
-          </a>
-          <a
-            className="secondary-action"
-            href="https://github.com/GitAxolotl/gitaxolotl"
-            target="_blank"
-            rel="noreferrer"
-          >
-            View on GitHub
-          </a>
-        </div>
-      </div>
-      <ul className="checklist" aria-label="Handoff checklist">
-        <li>
-          <strong>Repository</strong>
-          <span>Vite + React + TypeScript, no runtime deps beyond React.</span>
-        </li>
-        <li>
-          <strong>Design</strong>
-          <span>Restrained palette, one type scale, accessible focus rings.</span>
-        </li>
-        <li>
-          <strong>Quality</strong>
-          <span>Lint, build, contrast, and responsive checks before publish.</span>
-        </li>
-        <li>
-          <strong>Playground</strong>
-          <span>Single-file shell so it ports cleanly to the hosted runtime.</span>
-        </li>
-      </ul>
-    </section>
-  );
-}
-
-/* -------------------- root -------------------- */
-
-export default function App() {
-  const [kind, setKind] = useState<SourceKind>("repo");
-  const [value, setValue] = useState<string>(SOURCE_EXAMPLES.repo[0]);
-  const [briefState, setBriefState] = useState<BriefState>({ status: "idle" });
-  const inputRef = useRef<HTMLInputElement>(null);
-  const briefTimerRef = useRef<number | null>(null);
-
-  const resolved = useMemo(() => normalizeSource(kind, value), [kind, value]);
-  const profile = kind === "repo" ? REPO_PROFILE : SITE_PROFILE;
-
-  const cancelPendingBrief = () => {
-    if (briefTimerRef.current !== null) {
-      window.clearTimeout(briefTimerRef.current);
-      briefTimerRef.current = null;
-    }
-  };
-
-  // Reset whenever the user changes source — explicit, no effect needed.
-  const updateKind = (next: SourceKind) => {
-    setKind(next);
-    cancelPendingBrief();
-    setBriefState({ status: "idle" });
-  };
-
-  const updateValue = (next: string) => {
-    setValue(next);
-    cancelPendingBrief();
-    setBriefState({ status: "idle" });
-  };
-
-  useEffect(
-    () => () => {
-      if (briefTimerRef.current !== null) {
-        window.clearTimeout(briefTimerRef.current);
-      }
-    },
-    [],
-  );
-
-  const jumpToBuilder = () => {
-    const node = document.getElementById("builder");
-    if (node) {
-      const prefersReducedMotion =
-        typeof window !== "undefined" &&
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      node.scrollIntoView({
-        behavior: prefersReducedMotion ? "auto" : "smooth",
-        block: "start",
+  for (const node of nodes) {
+    const parts = node.path.split("/");
+    const top = parts[0];
+    if (!topLevel.has(top)) {
+      topLevel.set(top, {
+        isDir: parts.length > 1 || node.type === "tree",
+        children: 0,
       });
     }
-    requestAnimationFrame(() => inputRef.current?.focus());
-  };
+    if (parts.length > 1) {
+      topLevel.get(top)!.children++;
+    }
+  }
 
-  const generateBrief = () => {
-    const brief = buildBrief(kind, resolved);
-    setBriefState({ status: "generating", startedAt: performance.now() });
-    cancelPendingBrief();
-    briefTimerRef.current = window.setTimeout(() => {
-      setBriefState({ status: "ready", brief });
-      briefTimerRef.current = null;
-    }, brief.generatedInMs);
-  };
+  // Sort: directories first, then files
+  const sorted = [...topLevel.entries()].sort((a, b) => {
+    if (a[1].isDir && !b[1].isDir) return -1;
+    if (!a[1].isDir && b[1].isDir) return 1;
+    return a[0].localeCompare(b[0]);
+  });
 
-  const resetBrief = () => {
-    cancelPendingBrief();
-    setBriefState({ status: "idle" });
-    requestAnimationFrame(() => inputRef.current?.focus());
-  };
-
-  useEffect(() => {
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-      if (tag === "input" || tag === "textarea") return;
-      if (event.key === "/") {
-        event.preventDefault();
-        jumpToBuilder();
+  for (const [name, info] of sorted) {
+    result.push({
+      name: info.isDir ? name + "/" : name,
+      depth: 0,
+      isDir: info.isDir,
+      ext: info.isDir ? "" : name.includes(".") ? "." + name.split(".").pop() : "",
+    });
+    // Show up to 3 children per dir
+    if (info.isDir && info.children > 0) {
+      const children = nodes
+        .filter((n) => {
+          const parts = n.path.split("/");
+          return parts[0] === name && parts.length === 2;
+        })
+        .slice(0, 4);
+      for (const child of children) {
+        const childName = child.path.split("/").pop()!;
+        const childIsDir = child.type === "tree";
+        result.push({
+          name: childIsDir ? childName + "/" : childName,
+          depth: 1,
+          isDir: childIsDir,
+          ext: childIsDir
+            ? ""
+            : childName.includes(".")
+              ? "." + childName.split(".").pop()
+              : "",
+        });
       }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+      if (info.children > 4) {
+        result.push({
+          name: `… +${info.children - 4} more`,
+          depth: 1,
+          isDir: false,
+          ext: "",
+        });
+      }
+    }
+  }
 
+  return result;
+}
+
+function analyzeQualityGates(
+  repo: RepoData,
+  tree: TreeNode[]
+): Array<{
+  name: string;
+  score: number;
+  status: "passed" | "partial" | "missing" | "unknown";
+  detail: string;
+}> {
+  const paths = tree.map((n) => n.path.toLowerCase());
+  const hasFile = (patterns: string[]) =>
+    patterns.some((p) => paths.some((fp) => fp.includes(p)));
+
+  // README
+  const hasReadme = hasFile(["readme.md"]);
+  // CI/CD
+  const hasCI = hasFile([
+    ".github/workflows",
+    ".gitlab-ci.yml",
+    "jenkinsfile",
+    ".circleci",
+  ]);
+  // Tests
+  const hasTests = hasFile([
+    ".test.",
+    ".spec.",
+    "__tests__",
+    "tests/",
+    "test/",
+  ]);
+  // TypeScript
+  const hasTS = hasFile(["tsconfig", ".ts", ".tsx"]);
+  // Linting
+  const hasLint = hasFile([
+    ".eslintrc",
+    "eslint.config",
+    ".prettierrc",
+    "prettier.config",
+    ".stylelintrc",
+    "biome.json",
+  ]);
+  // License
+  const hasLicense = hasFile(["license", "licence"]) || repo.license !== null;
+
+  return [
+    {
+      name: "README",
+      score: hasReadme ? 100 : 0,
+      status: hasReadme ? "passed" : "missing",
+      detail: hasReadme
+        ? "README.md present in repository root"
+        : "No README.md found",
+    },
+    {
+      name: "CI / CD",
+      score: hasCI ? 100 : 0,
+      status: hasCI ? "passed" : "missing",
+      detail: hasCI
+        ? "GitHub Actions workflows detected"
+        : "No CI/CD configuration found",
+    },
+    {
+      name: "Tests",
+      score: hasTests ? 90 : 0,
+      status: hasTests ? "passed" : "missing",
+      detail: hasTests
+        ? "Test files detected in repository"
+        : "No test files found",
+    },
+    {
+      name: "TypeScript",
+      score: hasTS ? 100 : 0,
+      status: hasTS ? "passed" : "missing",
+      detail: hasTS
+        ? `${repo.language || "TypeScript"} — type-safe codebase`
+        : "No TypeScript configuration found",
+    },
+    {
+      name: "Linting",
+      score: hasLint ? 85 : 0,
+      status: hasLint ? "passed" : "missing",
+      detail: hasLint
+        ? "ESLint / Prettier configuration detected"
+        : "No linter configuration found",
+    },
+    {
+      name: "License",
+      score: hasLicense ? 100 : 0,
+      status: hasLicense ? "passed" : "missing",
+      detail: hasLicense
+        ? `Licensed under ${repo.license?.spdx_id || "custom license"}`
+        : "No license file found",
+    },
+  ];
+}
+
+function getFileIcon(isDir: boolean, ext: string): string {
+  if (isDir) return "📁";
+  const iconMap: Record<string, string> = {
+    ".ts": "🔷",
+    ".tsx": "⚛️",
+    ".js": "🟡",
+    ".jsx": "⚛️",
+    ".css": "🎨",
+    ".scss": "🎨",
+    ".html": "🌐",
+    ".json": "📋",
+    ".md": "📝",
+    ".yml": "⚙️",
+    ".yaml": "⚙️",
+    ".svg": "🖼️",
+    ".png": "🖼️",
+    ".jpg": "🖼️",
+  };
+  return iconMap[ext] || "📄";
+}
+
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
+
+function scoreClass(score: number): string {
+  if (score >= 80) return "high";
+  if (score >= 40) return "medium";
+  if (score > 0) return "low";
+  return "na";
+}
+
+// ── Components ─────────────────────────────────────────────
+
+function Topbar() {
   return (
-    <div className="app-shell">
-      <Topbar kind={kind} source={resolved} />
-      <main>
-        <Hero profile={profile} onJumpToBuilder={jumpToBuilder} />
-        <Builder
-          kind={kind}
-          setKind={updateKind}
-          value={value}
-          setValue={updateValue}
-          resolved={resolved}
-          profile={profile}
-          briefState={briefState}
-          onSubmit={generateBrief}
-          onReset={resetBrief}
-          inputRef={inputRef}
-        />
-        <Pipeline />
-        <Quality />
-        <Crew />
-        <Audit />
-        <Handoff />
-        <footer className="page-footer">
-          <span>GitAxolotl · part of the GitLawB network.</span>
-          <span className="kbd-hint">
-            Press <kbd>/</kbd> to focus the source field
-          </span>
-        </footer>
-      </main>
+    <div className="topbar">
+      <div className="topbar-brand">
+        <div className="topbar-brand-icon">G</div>
+        <span>GitAxolotl</span>
+      </div>
+      <div className="topbar-links">
+        <a href="#overview">Overview</a>
+        <a href="#gates">Gates</a>
+        <a href="#analysis">Analysis</a>
+        <a href="#status">Status</a>
+      </div>
+      <div className="topbar-status">
+        <span className="pulse-dot" />
+        <span>System operational</span>
+      </div>
     </div>
   );
 }
 
+function Hero({ repo }: { repo: RepoData }) {
+  return (
+    <div className="hero">
+      <div className="mascot-container">
+        <pre className="ascii-mascot">{ASCII_AXOLOTL}</pre>
+      </div>
+      <h1 className="hero-title">
+        Builder <span className="accent">Control Room</span>
+      </h1>
+      <p className="hero-subtitle">
+        {repo.full_name} — {repo.description || "No description"}
+      </p>
+    </div>
+  );
+}
+
+function OverviewSection({ repo }: { repo: RepoData }) {
+  const stats = [
+    {
+      label: "Stars",
+      value: repo.stargazers_count.toLocaleString(),
+      sub: "GitHub stars",
+    },
+    {
+      label: "Forks",
+      value: repo.forks_count.toLocaleString(),
+      sub: "Repository forks",
+    },
+    {
+      label: "Issues",
+      value: repo.open_issues_count.toLocaleString(),
+      sub: "Open issues",
+    },
+    {
+      label: "Size",
+      value:
+        repo.size > 1024
+          ? (repo.size / 1024).toFixed(1) + " MB"
+          : repo.size + " KB",
+      sub: "Repository size",
+    },
+  ];
+
+  return (
+    <div className="section" id="overview">
+      <div className="section-header">
+        <div className="section-title">
+          <span className="section-title-icon">◆</span> Overview
+        </div>
+        <span className="section-badge">
+          Updated {timeAgo(repo.pushed_at)}
+        </span>
+      </div>
+      <div className="stats-grid">
+        {stats.map((s) => (
+          <div className="stat-card" key={s.label}>
+            <span className="stat-label">{s.label}</span>
+            <span className="stat-number">{s.value}</span>
+            <span className="stat-sub">{s.sub}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QualityGatesSection({
+  repo,
+  tree,
+}: {
+  repo: RepoData;
+  tree: TreeNode[];
+}) {
+  const gates = analyzeQualityGates(repo, tree);
+  const passedCount = gates.filter((g) => g.status === "passed").length;
+  const avgScore = Math.round(
+    gates.reduce((sum, g) => sum + g.score, 0) / gates.length
+  );
+
+  return (
+    <div className="section" id="gates">
+      <div className="section-header">
+        <div className="section-title">
+          <span className="section-title-icon">◆</span> Quality Gates
+        </div>
+        <span className="section-badge">
+          {passedCount}/{gates.length} passed · avg {avgScore}%
+        </span>
+      </div>
+      <div className="gates-grid">
+        {gates.map((gate) => (
+          <div className={`gate-card ${gate.status}`} key={gate.name}>
+            <div className="gate-top">
+              <span className="gate-name">{gate.name}</span>
+              <span className={`gate-score ${scoreClass(gate.score)}`}>
+                {gate.score > 0 ? `${gate.score}%` : "—"}
+              </span>
+            </div>
+            <div className="gate-detail">{gate.detail}</div>
+            <div className="gate-bar">
+              <div
+                className={`gate-bar-fill ${scoreClass(gate.score)}`}
+                style={{ width: `${gate.score}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CodeAnalysisSection({
+  tree,
+}: {
+  tree: TreeNode[];
+}) {
+  const blobCount = tree.filter((n) => n.type === "blob").length;
+  const dirCount = tree.filter((n) => n.type === "tree").length;
+  const totalSize = tree.reduce((sum, n) => sum + (n.size || 0), 0);
+  const extCounts = countFilesByExtension(tree);
+
+  // Top languages by file count
+  const langEntries = Object.entries(extCounts)
+    .map(([ext, count]) => ({
+      ext,
+      lang: getLanguageFromExt(ext),
+      count,
+      pct: Math.round((count / blobCount) * 100),
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 7);
+
+  // File tree
+  const treeView = buildFileTree(tree);
+
+  return (
+    <div className="section" id="analysis">
+      <div className="section-header">
+        <div className="section-title">
+          <span className="section-title-icon">◆</span> Code Analysis
+        </div>
+        <span className="section-badge">
+          {blobCount} files · {dirCount} directories ·{" "}
+          {(totalSize / 1024).toFixed(0)} KB
+        </span>
+      </div>
+      <div className="analysis-grid">
+        {/* Languages */}
+        <div className="analysis-card">
+          <div className="analysis-card-title">
+            <span className="text-green">◈</span> Languages
+          </div>
+          <div className="lang-list">
+            {langEntries.map((entry, i) => (
+              <div className="lang-item" key={entry.ext}>
+                <span className="lang-name">{entry.lang}</span>
+                <div className="lang-bar-track">
+                  <div
+                    className={`lang-bar-fill ${i > 0 ? "l" + (i + 1) : ""}`}
+                    style={{ width: `${entry.pct}%` }}
+                  />
+                </div>
+                <span className="lang-pct">
+                  {entry.count} files · {entry.pct}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* File Structure */}
+        <div className="analysis-card">
+          <div className="analysis-card-title">
+            <span className="text-green">◈</span> File Structure
+          </div>
+          <div className="file-tree">
+            {treeView.map((item, i) => (
+              <div className="tree-line" key={i}>
+                <span className="tree-icon">
+                  {getFileIcon(item.isDir, item.ext)}
+                </span>
+                <span
+                  className="tree-indent"
+                  style={{ width: item.depth * 20 + "px" }}
+                />
+                <span className={`tree-name ${item.isDir ? "is-dir" : ""}`}>
+                  {item.name}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LiveStatusSection({ repo }: { repo: RepoData }) {
+  const statuses = [
+    {
+      label: "API Connection",
+      value: "GitHub REST v3",
+      dot: "green" as const,
+    },
+    {
+      label: "Repository",
+      value: repo.private ? "Private" : "Public",
+      dot: repo.private ? "yellow" : "green" as const,
+    },
+    {
+      label: "Default Branch",
+      value: repo.default_branch,
+      dot: "blue" as const,
+    },
+    {
+      label: "Primary Language",
+      value: repo.language || "Not specified",
+      dot: "green" as const,
+    },
+    {
+      label: "Last Push",
+      value: timeAgo(repo.pushed_at),
+      dot: "green" as const,
+    },
+    {
+      label: "License",
+      value: repo.license?.spdx_id || "Unlicensed",
+      dot: repo.license ? "green" : "yellow" as const,
+    },
+  ];
+
+  return (
+    <div className="section" id="status">
+      <div className="section-header">
+        <div className="section-title">
+          <span className="section-title-icon">◆</span> Live Status
+        </div>
+        <span className="section-badge">Real-time</span>
+      </div>
+      <div className="status-grid">
+        {statuses.map((s) => (
+          <div className="status-card" key={s.label}>
+            <div className="status-indicator">
+              <span className={`status-dot ${s.dot}`} />
+              <span className="status-label">{s.label}</span>
+            </div>
+            <span className="status-value">{s.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TopicsSection({ repo }: { repo: RepoData }) {
+  if (!repo.topics || repo.topics.length === 0) return null;
+  return (
+    <div className="section">
+      <div className="section-header">
+        <div className="section-title">
+          <span className="section-title-icon">◆</span> Topics
+        </div>
+        <span className="section-badge">{repo.topics.length}</span>
+      </div>
+      <div className="flex gap-8" style={{ flexWrap: "wrap" }}>
+        {repo.topics.map((t) => (
+          <span
+            key={t}
+            style={{
+              display: "inline-block",
+              padding: "4px 12px",
+              fontSize: "0.72rem",
+              background: "rgba(34, 197, 94, 0.1)",
+              border: "1px solid rgba(34, 197, 94, 0.2)",
+              borderRadius: "6px",
+              color: "#22c55e",
+              fontWeight: 500,
+            }}
+          >
+            {t}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Footer() {
+  return (
+    <div className="footer">
+      <span>GitAxolotl · Builder Control Room</span>
+      <span>
+        <a
+          href="https://github.com/GitAxolotl/gitaxolotl"
+          target="_blank"
+          rel="noreferrer"
+        >
+          GitHub
+        </a>{" "}
+        · <span className="text-muted">v0.1.0</span>
+      </span>
+    </div>
+  );
+}
+
+// ── Main App ───────────────────────────────────────────────
+
+export default function App() {
+  const [state, setState] = useState<AppState>({
+    repo: null,
+    tree: null,
+    loading: true,
+    error: null,
+  });
+
+  const fetchData = useCallback(async () => {
+    setState((s) => ({ ...s, loading: true, error: null }));
+    try {
+      const [repoRes, treeRes] = await Promise.all([
+        fetch(REPO_API),
+        fetch(TREE_API),
+      ]);
+
+      if (!repoRes.ok) {
+        throw new Error(
+          `GitHub API error (repo): ${repoRes.status} ${repoRes.statusText}`
+        );
+      }
+      if (!treeRes.ok) {
+        throw new Error(
+          `GitHub API error (tree): ${treeRes.status} ${treeRes.statusText}`
+        );
+      }
+
+      const repo: RepoData = await repoRes.json();
+      const tree: TreeData = await treeRes.json();
+
+      setState({ repo, tree, loading: false, error: null });
+    } catch (err) {
+      setState({
+        repo: null,
+        tree: null,
+        loading: false,
+        error: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Loading state
+  if (state.loading) {
+    return (
+      <div className="app">
+        <Topbar />
+        <div className="loading-container">
+          <div className="spinner" />
+          <span className="loading-text">
+            Connecting to GitHub API…
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (state.error || !state.repo || !state.tree) {
+    return (
+      <div className="app">
+        <Topbar />
+        <div className="error-card">
+          <h2>Connection Failed</h2>
+          <p>{state.error || "Unable to fetch repository data"}</p>
+          <button className="retry-btn" onClick={fetchData}>
+            Retry Connection
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const { repo, tree } = state;
+  const blobNodes = tree.tree.filter((n) => n.type === "blob");
+
+  return (
+    <div className="app">
+      <Topbar />
+      <Hero repo={repo} />
+      <OverviewSection repo={repo} />
+      <QualityGatesSection repo={repo} tree={blobNodes} />
+      <CodeAnalysisSection tree={tree.tree} />
+      <TopicsSection repo={repo} />
+      <LiveStatusSection repo={repo} />
+      <Footer />
+    </div>
+  );
+}
