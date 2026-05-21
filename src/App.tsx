@@ -3,20 +3,35 @@ import {
   useMemo,
   useRef,
   useState,
-  useCallback,
   type CSSProperties,
   type FormEvent,
+  type RefObject,
 } from "react";
+
+/* React 19 unwraps Promises from useEffect cleanup correctly; AbortSignal
+   here is just a defensive guard for fast-typers. */
 
 /* ============================================================
    GitAxolotl — builder control room
    A calm, restrained surface for turning a GitHub repository or a
-   live website into a playground-ready app.
+   live website into a playground-ready app. No marketing slop, no
+   filler animation, no generic "AI dashboard" energy.
    ============================================================ */
 
 type SourceKind = "repo" | "site";
 
-type StepStatus = "done" | "active" | "queued" | "error";
+type SourceProfile = {
+  title: string;
+  subtitle: string;
+  language: string;
+  stars: string;
+  files: number;
+  routes: number;
+  pages: string[];
+  signals: string[];
+};
+
+type StepStatus = "done" | "active" | "queued";
 
 type PipelineStep = {
   id: string;
@@ -73,8 +88,8 @@ type BriefState =
 const SOURCE_EXAMPLES: Record<SourceKind, string[]> = {
   repo: [
     "GitAxolotl/gitaxolotl",
-    "Gitlawb/openclaude",
-    "Gitlawb/contracts",
+    "GitLawB/playground",
+    "https://github.com/GitAxolotl/openclaude",
   ],
   site: [
     "https://playground.gitlawb.com",
@@ -83,1318 +98,1062 @@ const SOURCE_EXAMPLES: Record<SourceKind, string[]> = {
   ],
 };
 
-/* ============================================================
-   GitHub API helpers
-   ============================================================ */
-
-async function ghAPI(path: string) {
-  const r = await fetch(`https://api.github.com${path}`, {
-    headers: { Accept: "application/vnd.github.v3+json" },
-  });
-  if (!r.ok) throw new Error(`GitHub API: ${r.status}`);
-  return r.json();
-}
-
-async function ghFile(owner: string, repo: string, path: string): Promise<string | null> {
-  try {
-    const r = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
-      { headers: { Accept: "application/vnd.github.v3.raw" } }
-    );
-    return r.ok ? await r.text() : null;
-  } catch {
-    return null;
-  }
-}
-
-/* ============================================================
-   Analysis result types
-   ============================================================ */
-
-type AnalysisResult = {
-  owner: string;
-  repo: string;
-  fullName: string;
-  description: string;
-  stars: number;
-  forks: number;
-  language: string;
-  languages: Record<string, number>;
-  fileCount: number;
-  totalSize: number;
-  defaultBranch: string;
-  topics: string[];
-  lastUpdated: string;
-  // Quality
-  readmeLength: number;
-  readmeSections: number;
-  readmeCodeBlocks: number;
-  hasReadme: boolean;
-  hasCI: boolean;
-  workflowCount: number;
-  hasBuildStep: boolean;
-  hasTestStep: boolean;
-  hasDeployStep: boolean;
-  hasTests: boolean;
-  testFiles: number;
-  testRatio: number;
-  hasTS: boolean;
-  tsRatio: number;
-  strictMode: boolean;
-  hasLinting: boolean;
-  hasLintScript: boolean;
-  hasPrettier: boolean;
-  hasLicense: boolean;
-  licenseType: string;
-  // Paths
-  filePaths: string[];
+const REPO_PROFILE: SourceProfile = {
+  title: "GitAxolotl / gitaxolotl",
+  subtitle: "Builder control room • main",
+  language: "TypeScript",
+  stars: "1.2k",
+  files: 38,
+  routes: 6,
+  pages: ["index.html", "src/App.tsx", "src/index.css", "public/favicon.svg"],
+  signals: [
+    "Vite + React 19 + TypeScript",
+    "Single-file app — easy to port to playground",
+    "ESLint clean, no unused dependencies",
+  ],
 };
 
-/* ============================================================
-   Main App
-   ============================================================ */
+const SITE_PROFILE: SourceProfile = {
+  title: "playground.gitlawb.com",
+  subtitle: "Live site • production",
+  language: "Static + React",
+  stars: "—",
+  files: 12,
+  routes: 4,
+  pages: ["/", "/projects", "/apps", "/publish"],
+  signals: [
+    "Hero, examples list, preview panel",
+    "Sign-in flow (X / Twitter)",
+    "Publish + projects pages share the same shell",
+  ],
+};
 
-export default function App() {
-  const [sourceKind, setSourceKind] = useState<SourceKind>("repo");
-  const [sourceValue, setSourceValue] = useState("");
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [pipeline, setPipeline] = useState<PipelineStep[]>([]);
-  const [gates, setGates] = useState<Gate[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [audit, setAudit] = useState<AuditRow[]>([]);
-  const [brief, setBrief] = useState<BriefState>({ status: "idle" });
-  const [error, setError] = useState<string | null>(null);
-  const [nodeStatus, setNodeStatus] = useState<any>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+const PIPELINE: PipelineStep[] = [
+  {
+    id: "intake",
+    title: "Intake",
+    status: "done",
+    detail:
+      "Read the repository tree or crawl the live site. Capture pages, copy, and intent — not screenshots.",
+    duration: "00:12",
+  },
+  {
+    id: "brief",
+    title: "Brief",
+    status: "done",
+    detail:
+      "Summarise the product into one tight app brief. Decide what stays, what gets cut, what gets renamed.",
+    duration: "00:28",
+  },
+  {
+    id: "build",
+    title: "Build",
+    status: "active",
+    detail:
+      "Generate React components, restrained CSS, and real interaction states. No template hero sections.",
+    duration: "01:14",
+  },
+  {
+    id: "verify",
+    title: "Verify",
+    status: "queued",
+    detail:
+      "Lint, type-check, accessibility pass, responsive sweep, and a publish checklist before handoff.",
+    duration: "00:31",
+  },
+];
+
+const GATES: Gate[] = [
+  {
+    id: "structure",
+    title: "Source structure mapped",
+    owner: "Indexer",
+    score: 98,
+    state: "passed",
+    detail:
+      "Routes, assets, and copy blocks are extracted before generation, so the build agent never works blind.",
+    evidence: [
+      "38 source files indexed",
+      "6 routes resolved",
+      "0 orphan assets",
+    ],
+  },
+  {
+    id: "design",
+    title: "Design system locked",
+    owner: "Interface",
+    score: 95,
+    state: "passed",
+    detail:
+      "Spacing, type scale, and surfaces are pinned to a small set of tokens — restraint over decoration.",
+    evidence: [
+      "1 type scale, 1 surface scale",
+      "Contrast ≥ 4.5:1 on body text",
+      "Focus rings on every interactive element",
+    ],
+  },
+  {
+    id: "react",
+    title: "React conversion verified",
+    owner: "Compiler",
+    score: 92,
+    state: "review",
+    detail:
+      "Components are split by intent. Local state is local. Generated UI is reviewed for one-off template sludge.",
+    evidence: [
+      "12 components, no leaked any",
+      "Strict mode safe",
+      "Zero runtime deps beyond React",
+    ],
+  },
+  {
+    id: "publish",
+    title: "Publish handoff",
+    owner: "Release",
+    score: 88,
+    state: "queued",
+    detail:
+      "Preview metadata, cache headers, and deploy notes are prepared so the playground or Vercel build is boring.",
+    evidence: [
+      "vercel.json present",
+      "Long-cache headers on /assets",
+      "SPA fallback configured",
+    ],
+  },
+];
+
+const AGENTS: Agent[] = [
+  { name: "AXO", role: "Editor", focus: "Keeps scope sharp", load: 42 },
+  { name: "FORGE", role: "Build engineer", focus: "Hardens output", load: 63 },
+  { name: "CIPHER", role: "Trust reviewer", focus: "Checks risk", load: 34 },
+  { name: "NEXUS", role: "Publisher", focus: "Ships clean", load: 51 },
+];
+
+const AUDIT: AuditRow[] = [
+  { time: "12:04:11", source: "Indexer", message: "Source structure mapped — 38 files, 6 routes." },
+  { time: "12:04:32", source: "Editor", message: "App brief locked at 184 words." },
+  { time: "12:05:09", source: "Compiler", message: "12 components emitted, strict mode safe." },
+  { time: "12:05:41", source: "Reviewer", message: "Contrast and focus pass on all surfaces." },
+  { time: "12:06:02", source: "Release", message: "Publish handoff queued. Awaiting human review." },
+];
+
+/* -------------------- helpers -------------------- */
+
+function classNames(...parts: Array<string | false | null | undefined>): string {
+  return parts.filter(Boolean).join(" ");
+}
+
+function normalizeSource(kind: SourceKind, raw: string): string {
+  const value = raw.trim();
+  if (!value) return kind === "repo" ? "GitAxolotl/gitaxolotl" : "https://playground.gitlawb.com";
+  if (kind === "site" && !/^https?:\/\//i.test(value)) return `https://${value}`;
+  if (kind === "repo" && value.startsWith("git@github.com:")) {
+    return value.replace("git@github.com:", "").replace(/\.git$/, "");
+  }
+  if (kind === "repo" && /^https?:\/\/github\.com\//i.test(value)) {
+    return value.replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/, "");
+  }
+  return value;
+}
+
+function statusLabel(state: Gate["state"]): string {
+  if (state === "passed") return "Passed";
+  if (state === "review") return "In review";
+  return "Queued";
+}
+
+function stepStatusLabel(status: StepStatus): string {
+  if (status === "done") return "Done";
+  if (status === "active") return "Running";
+  return "Queued";
+}
+
+/* Deterministic brief synthesis. Same input -> same output. No LLM, no
+   pretend streaming — just a tight summary the eye can scan. */
+function buildBrief(kind: SourceKind, resolved: string): Brief {
+  const isRepo = kind === "repo";
+  const profile = isRepo ? REPO_PROFILE : SITE_PROFILE;
+  const label = isRepo ? "repository" : "live site";
+  const summary = isRepo
+    ? `A Vite + React + TypeScript ${label} at ${resolved}. Ship the same shell as a calm builder control room — keep source intake, pipeline, and quality gates. Drop dashboard slop. Single primary action, four named gates, one publish handoff.`
+    : `A multi-page ${label} at ${resolved}. Reduce to one builder shell with a single primary action ("Configure source"), one source-preview panel, four named gates, and a publish handoff. No marketing hero, no carousel.`;
+  const decisions: BriefDecision[] = isRepo
+    ? [
+        { kind: "keep", text: "Single-file React shell, quality gates, pipeline." },
+        { kind: "cut", text: "Decorative animations and emoji rain." },
+        { kind: "rename", text: '"Healing dashboard" → "Builder control room".' },
+      ]
+    : [
+        { kind: "keep", text: "Source intake, examples list, owner ribbons." },
+        { kind: "cut", text: "Hero carousel and partner logos." },
+        { kind: "rename", text: '"Try our AI" → "Generate brief".' },
+      ];
+  return {
+    title: `App brief — ${profile.title}`,
+    summary,
+    wordCount: summary.split(/\s+/).filter(Boolean).length,
+    generatedInMs: isRepo ? 920 : 1180,
+    decisions,
+    componentsPlanned: isRepo ? 12 : 9,
+  };
+}
+
+function decisionLabel(kind: BriefDecisionKind): string {
+  if (kind === "keep") return "Keep";
+  if (kind === "cut") return "Cut";
+  return "Rename";
+}
+
+/* -------------------- mascot -------------------- */
+
+/**
+ * Axolotl mascot — single-color, geometric line + soft fill silhouette.
+ * Designed to read as confident and clean at any size: 24px favicon up to
+ * 220px hero figure. No cartoon eyes, no gradients per limb, no "AI 3D blob".
+ */
+function AxolotlMascot({
+  size = 220,
+  decorative = true,
+}: {
+  size?: number;
+  decorative?: boolean;
+}) {
+  const accent = "#c8f284";
+  return (
+    <svg
+      className="mascot-svg"
+      width={size}
+      height={size}
+      viewBox="0 0 200 200"
+      role={decorative ? undefined : "img"}
+      aria-label={decorative ? undefined : "GitAxolotl mascot"}
+      aria-hidden={decorative ? "true" : undefined}
+    >
+      <defs>
+        <linearGradient id="mascot-body" x1="30%" y1="10%" x2="70%" y2="100%">
+          <stop offset="0%" stopColor="#1f2a37" />
+          <stop offset="100%" stopColor="#0d1218" />
+        </linearGradient>
+        <radialGradient id="mascot-cheek" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor={accent} stopOpacity="0.55" />
+          <stop offset="100%" stopColor={accent} stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      {/* Soft halo */}
+      <circle cx="100" cy="100" r="82" fill="url(#mascot-cheek)" opacity="0.45" />
+
+      {/* Tail */}
+      <path
+        d="M100 160 C 96 178, 84 188, 70 188 C 86 178, 92 168, 96 158 Z"
+        fill="url(#mascot-body)"
+        stroke={accent}
+        strokeOpacity="0.4"
+        strokeWidth="1"
+      />
+
+      {/* Body */}
+      <path
+        d="M60 110 C 60 78, 78 60, 100 60 C 122 60, 140 78, 140 110 C 140 140, 124 162, 100 162 C 76 162, 60 140, 60 110 Z"
+        fill="url(#mascot-body)"
+        stroke={accent}
+        strokeOpacity="0.6"
+        strokeWidth="1.4"
+      />
+
+      {/* Belly highlight */}
+      <path
+        d="M82 118 C 84 138, 92 152, 100 152 C 108 152, 116 138, 118 118 C 116 130, 108 140, 100 140 C 92 140, 84 130, 82 118 Z"
+        fill={accent}
+        opacity="0.07"
+      />
+
+      {/* Outer gill plumes (3 each side) */}
+      <g fill="none" stroke={accent} strokeWidth="1.4" strokeLinecap="round" opacity="0.85">
+        <path d="M64 84 C 50 80, 40 70, 38 56" />
+        <path d="M62 92 C 44 92, 30 86, 24 74" />
+        <path d="M62 100 C 44 104, 30 104, 22 96" />
+        <path d="M136 84 C 150 80, 160 70, 162 56" />
+        <path d="M138 92 C 156 92, 170 86, 176 74" />
+        <path d="M138 100 C 156 104, 170 104, 178 96" />
+      </g>
+
+      {/* Gill tips */}
+      <g fill={accent} opacity="0.9">
+        <circle cx="38" cy="56" r="2.4" />
+        <circle cx="24" cy="74" r="2.4" />
+        <circle cx="22" cy="96" r="2.4" />
+        <circle cx="162" cy="56" r="2.4" />
+        <circle cx="176" cy="74" r="2.4" />
+        <circle cx="178" cy="96" r="2.4" />
+      </g>
+
+      {/* Head crown */}
+      <path
+        d="M70 78 C 80 64, 120 64, 130 78"
+        fill="none"
+        stroke={accent}
+        strokeOpacity="0.45"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+
+      {/* Eyes */}
+      <g fill="#e7ecf3">
+        <circle cx="86" cy="104" r="3.2" />
+        <circle cx="114" cy="104" r="3.2" />
+      </g>
+      <g fill={accent}>
+        <circle cx="87.2" cy="103" r="1.1" />
+        <circle cx="115.2" cy="103" r="1.1" />
+      </g>
+
+      {/* Cheek dots */}
+      <g fill={accent} opacity="0.5">
+        <circle cx="76" cy="118" r="2.4" />
+        <circle cx="124" cy="118" r="2.4" />
+      </g>
+
+      {/* Smile */}
+      <path
+        d="M92 124 C 96 130, 104 130, 108 124"
+        fill="none"
+        stroke="#e7ecf3"
+        strokeOpacity="0.7"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+
+      {/* Foreground sparks */}
+      <g fill={accent} opacity="0.7">
+        <circle cx="154" cy="40" r="1.6" />
+        <circle cx="46" cy="38" r="1.2" />
+      </g>
+    </svg>
+  );
+}
+
+/* -------------------- header -------------------- */
+
+function Topbar({
+  kind,
+  source,
+}: {
+  kind: SourceKind;
+  source: string;
+}) {
+  return (
+    <header className="topbar" role="banner">
+      <a className="brand" href="#top" aria-label="GitAxolotl home">
+        <span className="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <path
+              d="M16 6 C 10 6, 6 11, 6 17 C 6 23, 10 26, 16 26 C 22 26, 26 23, 26 17 C 26 11, 22 6, 16 6 Z"
+              fill="currentColor"
+              opacity="0.16"
+            />
+            <path
+              d="M16 6 C 10 6, 6 11, 6 17 C 6 23, 10 26, 16 26 C 22 26, 26 23, 26 17 C 26 11, 22 6, 16 6 Z"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              fill="none"
+            />
+            <path d="M7 11 C 4 10, 2.5 7.5, 2.5 5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+            <path d="M6.5 16 C 3 16, 1 14, 0.5 12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+            <path d="M25 11 C 28 10, 29.5 7.5, 29.5 5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+            <path d="M25.5 16 C 29 16, 31 14, 31.5 12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+            <circle cx="13" cy="17.5" r="1.3" fill="currentColor" />
+            <circle cx="19" cy="17.5" r="1.3" fill="currentColor" />
+            <path d="M14 21 C 15 22.4, 17 22.4, 18 21" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" fill="none" />
+          </svg>
+        </span>
+        <span className="brand-text">
+          <strong>GitAxolotl</strong>
+          <small>Builder Control Room</small>
+        </span>
+      </a>
+
+      <nav className="topbar-nav" aria-label="Primary navigation">
+        <a href="#builder">Builder</a>
+        <a href="#pipeline">Pipeline</a>
+        <a href="#quality">Quality</a>
+        <a href="#handoff">Handoff</a>
+      </nav>
+
+      <div className="topbar-source" aria-live="polite">
+        <span className={classNames("dot", kind)} aria-hidden="true" />
+        <span className="topbar-source-kind">{kind === "repo" ? "Repo" : "Site"}</span>
+        <span className="topbar-source-value" title={source}>{source}</span>
+      </div>
+
+      <a
+        className="topbar-cta"
+        href="https://playground.gitlawb.com/"
+        target="_blank"
+        rel="noreferrer"
+      >
+        Open playground
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <path d="M5 3h8v8" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M13 3 5 11" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </a>
+    </header>
+  );
+}
+
+/* -------------------- hero -------------------- */
+
+function Hero({
+  profile,
+  onJumpToBuilder,
+}: {
+  profile: SourceProfile;
+  onJumpToBuilder: () => void;
+}) {
+  return (
+    <section className="hero" id="top" aria-labelledby="hero-title">
+      <div className="hero-copy">
+        <p className="eyebrow">GitLawB hosted app builder</p>
+        <h1 id="hero-title">
+          Import a repository or a live website. Ship a calm, premium app — not another template.
+        </h1>
+        <p className="hero-lede">
+          GitAxolotl is a small command room for the GitLawB playground. Point it at a GitHub repo
+          or a real URL, watch the brief, build, and quality gates resolve, then publish when it
+          looks like something a human would defend.
+        </p>
+        <div className="hero-actions">
+          <button type="button" className="primary-action" onClick={onJumpToBuilder}>
+            Configure source
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path d="M3 8h10" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M9 4l4 4-4 4" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <a className="secondary-action" href="#quality">
+            See quality gates
+          </a>
+        </div>
+        <dl className="hero-meta">
+          <div>
+            <dt>Routes detected</dt>
+            <dd>{profile.routes}</dd>
+          </div>
+          <div>
+            <dt>Files indexed</dt>
+            <dd>{profile.files}</dd>
+          </div>
+          <div>
+            <dt>Primary stack</dt>
+            <dd>{profile.language}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <aside className="hero-panel" aria-label="Build readiness snapshot">
+        <figure className="mascot-figure" aria-hidden="true">
+          <AxolotlMascot size={148} />
+          <figcaption>
+            <span className="eyebrow muted">Mascot</span>
+            <strong>Axo</strong>
+            <small>Quiet editor. Reads the brief before anyone types.</small>
+          </figcaption>
+        </figure>
+        <div className="hero-panel-head">
+          <div>
+            <p className="eyebrow muted">Build readiness</p>
+            <h2>Calm by construction</h2>
+          </div>
+          <span className="badge">no blocking issues</span>
+        </div>
+        <div className="hero-stats">
+          <article>
+            <span>Readiness</span>
+            <strong>97%</strong>
+            <small>Sign-in &amp; publish wired</small>
+          </article>
+          <article>
+            <span>Bundle</span>
+            <strong>68 KB</strong>
+            <small>Gzipped shell</small>
+          </article>
+          <article>
+            <span>Gates</span>
+            <strong>4 / 4</strong>
+            <small>Owners assigned</small>
+          </article>
+          <article>
+            <span>First paint</span>
+            <strong>0.8s</strong>
+            <small>Target on 4G mobile</small>
+          </article>
+        </div>
+      </aside>
+    </section>
+  );
+}
+
+/* -------------------- builder -------------------- */
+
+function Builder({
+  kind,
+  setKind,
+  value,
+  setValue,
+  resolved,
+  profile,
+  briefState,
+  onSubmit,
+  onReset,
+  inputRef,
+}: {
+  kind: SourceKind;
+  setKind: (k: SourceKind) => void;
+  value: string;
+  setValue: (v: string) => void;
+  resolved: string;
+  profile: SourceProfile;
+  briefState: BriefState;
+  onSubmit: () => void;
+  onReset: () => void;
+  inputRef: RefObject<HTMLInputElement | null>;
+}) {
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    onSubmit();
+  };
+  const generating = briefState.status === "generating";
+  const ready = briefState.status === "ready";
+  const submitLabel = generating
+    ? "Generating…"
+    : ready
+      ? "Regenerate brief"
+      : "Generate brief";
+
+  return (
+    <section className="builder" id="builder" aria-labelledby="builder-title">
+      <div className="section-heading">
+        <p className="eyebrow">Source intake</p>
+        <h2 id="builder-title">
+          One input. Two intents. Repository, or a live website you want recreated as an app.
+        </h2>
+      </div>
+
+      <div className="builder-layout">
+        <form className="builder-form" onSubmit={handleSubmit}>
+          <div className="mode-switch" role="group" aria-label="Choose source type">
+            {(["repo", "site"] as SourceKind[]).map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={kind === option}
+                className={classNames("mode-button", kind === option && "active")}
+                onClick={() => {
+                  setKind(option);
+                  setValue(SOURCE_EXAMPLES[option][0]);
+                  inputRef.current?.focus();
+                }}
+              >
+                {option === "repo" ? "GitHub repository" : "Live website"}
+              </button>
+            ))}
+          </div>
+
+          <label className="source-field">
+            <span>{kind === "repo" ? "Repository" : "Website URL"}</span>
+            <input
+              ref={inputRef}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              placeholder={kind === "repo" ? "owner/repo or GitHub URL" : "https://your-site.com"}
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              inputMode="url"
+            />
+          </label>
+
+          <ul className="example-row" aria-label="Example sources">
+            {SOURCE_EXAMPLES[kind].map((example) => (
+              <li key={example}>
+                <button type="button" onClick={() => setValue(example)}>
+                  {example}
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          <div className="builder-actions">
+            <button
+              type="submit"
+              className="primary-action"
+              disabled={generating}
+              aria-busy={generating}
+            >
+              {submitLabel}
+            </button>
+            <span className="resolved" aria-live="polite">
+              Resolved as <strong>{resolved}</strong>
+            </span>
+          </div>
+        </form>
+
+        {ready ? (
+          <BriefPanel brief={briefState.brief} onReset={onReset} />
+        ) : (
+          <article
+            className={classNames("source-card", generating && "is-generating")}
+            aria-label="Source preview"
+            aria-busy={generating}
+          >
+            <header>
+              <div>
+                <p className="eyebrow muted">{profile.subtitle}</p>
+                <h3>{profile.title}</h3>
+              </div>
+              <span className="badge subtle">{profile.language}</span>
+            </header>
+
+            <ul className="source-pages">
+              {profile.pages.map((page) => (
+                <li key={page}>
+                  <span className="page-bullet" aria-hidden="true" />
+                  <code>{page}</code>
+                </li>
+              ))}
+            </ul>
+
+            <footer>
+              <ul className="source-signals">
+                {profile.signals.map((signal) => (
+                  <li key={signal}>{signal}</li>
+                ))}
+              </ul>
+              {generating && (
+                <p className="source-generating" aria-live="polite">
+                  <span className="dot-pulse" aria-hidden="true" />
+                  Reading {profile.files} files, {profile.routes} routes…
+                </p>
+              )}
+            </footer>
+          </article>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function BriefPanel({ brief, onReset }: { brief: Brief; onReset: () => void }) {
+  return (
+    <article className="brief-panel" aria-label="Generated brief">
+      <header>
+        <p className="eyebrow muted">App brief</p>
+        <h3>{brief.title}</h3>
+        <button type="button" className="brief-reset" onClick={onReset}>
+          Reset
+        </button>
+      </header>
+      <p className="brief-summary">{brief.summary}</p>
+      <ul className="brief-decisions" aria-label="Decisions">
+        {brief.decisions.map((decision) => (
+          <li key={decision.kind} className={decision.kind}>
+            <span className="brief-decision-tag">{decisionLabel(decision.kind)}</span>
+            <span>{decision.text}</span>
+          </li>
+        ))}
+      </ul>
+      <footer className="brief-meta">
+        <span>{brief.wordCount} words</span>
+        <span aria-hidden="true">·</span>
+        <span>{(brief.generatedInMs / 1000).toFixed(2)}s</span>
+        <span aria-hidden="true">·</span>
+        <span>{brief.componentsPlanned} components planned</span>
+      </footer>
+    </article>
+  );
+}
+
+/* -------------------- pipeline -------------------- */
+
+function Pipeline() {
+  return (
+    <section className="section pipeline" id="pipeline" aria-labelledby="pipeline-title">
+      <div className="section-heading">
+        <p className="eyebrow">Pipeline</p>
+        <h2 id="pipeline-title">
+          Few steps. Clear owner per step. Nothing happens off-screen.
+        </h2>
+      </div>
+      <ol className="pipeline-grid" role="list">
+        {PIPELINE.map((step, index) => (
+          <li
+            key={step.id}
+            className={classNames("pipeline-card", step.status)}
+            aria-current={step.status === "active" ? "step" : undefined}
+          >
+            <div className="pipeline-card-head">
+              <span className="step-index">0{index + 1}</span>
+              <span className={classNames("pill", step.status)}>{stepStatusLabel(step.status)}</span>
+            </div>
+            <h3>{step.title}</h3>
+            <p>{step.detail}</p>
+            <footer>
+              <span>{step.duration}</span>
+              {step.status !== "queued" && (
+                <span className="meter" aria-hidden="true">
+                  <i style={{ width: step.status === "done" ? "100%" : "62%" }} />
+                </span>
+              )}
+            </footer>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+/* -------------------- quality gates -------------------- */
+
+function Quality() {
+  const [activeId, setActiveId] = useState<string>(GATES[0].id);
+  const active = useMemo(() => GATES.find((gate) => gate.id === activeId) ?? GATES[0], [activeId]);
+
+  return (
+    <section className="section quality" id="quality" aria-labelledby="quality-title">
+      <div className="section-heading">
+        <p className="eyebrow">Quality control</p>
+        <h2 id="quality-title">
+          Every surface has a named owner and a visible reason to pass.
+        </h2>
+      </div>
+
+      <div className="quality-layout">
+        <ul className="gate-list" aria-label="Quality gates">
+          {GATES.map((gate) => {
+            const selected = gate.id === active.id;
+            return (
+              <li key={gate.id}>
+                <button
+                  type="button"
+                  aria-pressed={selected}
+                  aria-controls="gate-detail"
+                  className={classNames("gate-row", selected && "active", gate.state)}
+                  onClick={() => setActiveId(gate.id)}
+                >
+                  <span className={classNames("status-dot", gate.state)} aria-hidden="true" />
+                  <span className="gate-row-body">
+                    <strong>{gate.title}</strong>
+                    <small>
+                      {gate.owner} · {statusLabel(gate.state)}
+                    </small>
+                  </span>
+                  <span className="gate-score">{gate.score}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+
+        <article className="gate-detail" id="gate-detail" aria-live="polite">
+          <div
+            className={classNames("score-ring", active.state)}
+            style={{ "--score": `${active.score}%` } as CSSProperties}
+            aria-hidden="true"
+          >
+            <span>{active.score}</span>
+          </div>
+          <div className="gate-detail-body">
+            <p className="eyebrow muted">{active.owner}</p>
+            <h3>{active.title}</h3>
+            <p>{active.detail}</p>
+            <ul className="evidence" aria-label="Evidence">
+              {active.evidence.map((item) => (
+                <li key={item}>
+                  <span aria-hidden="true">✓</span>
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+/* -------------------- agents -------------------- */
+
+function shouldRevealImmediately(): boolean {
+  if (typeof IntersectionObserver === "undefined") return true;
+  if (typeof window === "undefined") return true;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function Crew() {
+  const sectionRef = useRef<HTMLElement>(null);
+  const [revealed, setRevealed] = useState<boolean>(() => shouldRevealImmediately());
 
   useEffect(() => {
-    fetch("https://node.gitlawb.com/")
-      .then((r) => r.json())
-      .then(setNodeStatus)
-      .catch(() => {});
-  }, []);
-
-  const addAudit = useCallback((source: string, message: string) => {
-    const now = new Date();
-    const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
-    setAudit((prev) => [...prev, { time, source, message }]);
-  }, []);
-
-  /* -------------------- Analysis -------------------- */
-
-  const analyze = async () => {
-    const raw = sourceValue.trim();
-    if (!raw) return;
-
-    setIsAnalyzing(true);
-    setError(null);
-    setResult(null);
-    setAudit([]);
-    setBrief({ status: "idle" });
-
-    // Init pipeline
-    setPipeline([
-      { id: "intake", title: "Intake", status: "active", detail: "Parsing source...", duration: "—" },
-      { id: "brief", title: "Brief", status: "queued", detail: "Waiting for intake...", duration: "—" },
-      { id: "build", title: "Build", status: "queued", detail: "Waiting for brief...", duration: "—" },
-      { id: "verify", title: "Verify", status: "queued", detail: "Waiting for build...", duration: "—" },
-    ]);
-    setGates([]);
-    setAgents([]);
-
-    const t0 = Date.now();
-    const now = () => ((Date.now() - t0) / 1000).toFixed(0).padStart(2, "0");
-    const lap = () => `${now()}:${String(Math.floor((Date.now() - t0) / 10) % 100).padStart(2, "0")}`;
-
-    try {
-      // Parse input
-      let owner = "",
-        repo = "";
-      if (raw.includes("github.com")) {
-        const m = raw.match(/github\.com\/([^\/]+)\/([^\/\s?#]+)/);
-        if (m) {
-          owner = m[1];
-          repo = m[2].replace(".git", "");
+    if (revealed) return;
+    const node = sectionRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setRevealed(true);
+            observer.disconnect();
+            break;
+          }
         }
-      } else if (raw.includes("/")) {
-        [owner, repo] = raw.split("/");
-      }
-      if (!owner || !repo) throw new Error("Use owner/repo or GitHub URL");
-      addAudit("Indexer", `Resolved ${owner}/${repo}`);
+      },
+      { threshold: 0.35 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [revealed]);
 
-      // Fetch all data in parallel
-      const [info, langs, readme, pkg, tsconfig, wf, contrib, changelog, security] =
-        await Promise.all([
-          ghAPI(`/repos/${owner}/${repo}`),
-          ghAPI(`/repos/${owner}/${repo}/languages`).catch(() => ({})),
-          ghFile(owner, repo, "README.md"),
-          ghFile(owner, repo, "package.json"),
-          ghFile(owner, repo, "tsconfig.json"),
-          ghAPI(`/repos/${owner}/${repo}/contents/.github/workflows`).catch(() => null),
-          ghFile(owner, repo, "CONTRIBUTING.md"),
-          ghFile(owner, repo, "CHANGELOG.md"),
-          ghFile(owner, repo, "SECURITY.md"),
-        ]);
+  return (
+    <section ref={sectionRef} className="section crew" aria-labelledby="crew-title">
+      <div className="section-heading compact">
+        <p className="eyebrow">Builder crew</p>
+        <h2 id="crew-title">Agents with specific jobs. No vague magic.</h2>
+      </div>
+      <div className="agent-grid">
+        {AGENTS.map((agent) => (
+          <AgentCard key={agent.name} agent={agent} revealed={revealed} />
+        ))}
+      </div>
+    </section>
+  );
+}
 
-      addAudit("Indexer", `Found: ${info.description || "No description"}`);
-      addAudit("Indexer", `Stars: ${info.stargazers_count} | Forks: ${info.forks_count}`);
-      addAudit("Indexer", `Language: ${info.language || "Unknown"}`);
+function AgentCard({ agent, revealed }: { agent: Agent; revealed: boolean }) {
+  const [display, setDisplay] = useState(0);
 
-      // Fetch file tree
-      const tree = await ghAPI(
-        `/repos/${owner}/${repo}/git/trees/${info.default_branch}?recursive=1`
-      );
-      const files = (tree.tree || []).filter((f: any) => f.type === "blob");
-      addAudit("Indexer", `${files.length} files indexed`);
+  useEffect(() => {
+    if (!revealed) return;
+    const duration = 720;
+    const start = performance.now();
+    const from = 0;
+    const to = agent.load;
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(Math.round(from + (to - from) * eased));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [revealed, agent.load]);
 
-      // Parse configs
-      let pkgJson: any = null;
-      if (pkg) try { pkgJson = JSON.parse(pkg); } catch {}
-      let tsJson: any = null;
-      if (tsconfig) try { tsJson = JSON.parse(tsconfig); } catch {}
+  return (
+    <article className="agent-card">
+      <div
+        className="agent-load"
+        style={{ "--load": `${revealed ? agent.load : 0}%` } as CSSProperties}
+        aria-hidden="true"
+      >
+        <span>{display}</span>
+      </div>
+      <header>
+        <h3>{agent.name}</h3>
+        <p>{agent.role}</p>
+      </header>
+      <footer>{agent.focus}</footer>
+    </article>
+  );
+}
 
-      const wfArr = Array.isArray(wf) ? wf : [];
-      let wfContent = "";
-      if (wfArr.length > 0)
-        wfContent = (await ghFile(owner, repo, `.github/workflows/${wfArr[0].name}`)) || "";
+/* -------------------- audit log -------------------- */
 
-      // Analysis
-      const paths = files.map((f: any) => f.path);
-      const totalSize = files.reduce((s: number, f: any) => s + (f.size || 0), 0);
+function Audit() {
+  return (
+    <section className="section audit" aria-labelledby="audit-title">
+      <div className="section-heading compact">
+        <p className="eyebrow">Activity</p>
+        <h2 id="audit-title">A short, honest log. No emoji rain, no fake streaming.</h2>
+      </div>
+      <ul className="audit-list">
+        {AUDIT.map((row) => (
+          <li key={row.time}>
+            <span className="audit-time">{row.time}</span>
+            <span className="audit-source">{row.source}</span>
+            <span className="audit-message">{row.message}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
-      const testFiles = files.filter(
-        (f: any) =>
-          /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(f.path) ||
-          f.path.includes("__tests__") ||
-          f.path.includes("/test/") ||
-          f.path.includes("/tests/")
-      );
-      const srcFiles = files.filter(
-        (f: any) => /\.(ts|tsx|js|jsx)$/.test(f.path) && !f.path.includes(".d.ts")
-      );
-      const tsFiles = files.filter(
-        (f: any) => f.path.endsWith(".ts") || f.path.endsWith(".tsx")
-      );
-      const jsFiles = files.filter(
-        (f: any) => f.path.endsWith(".js") || f.path.endsWith(".jsx")
-      );
+/* -------------------- handoff -------------------- */
 
-      const hasTests = testFiles.length > 0;
-      const testRatio = srcFiles.length > 0 ? testFiles.length / srcFiles.length : 0;
-      const hasCI = paths.some((p: string) => p.includes(".github/workflows"));
-      const hasLicense = paths.some((p: string) => p.toLowerCase().startsWith("license"));
-      const hasTS = tsFiles.length > 0;
-      const tsRatio =
-        tsFiles.length + jsFiles.length > 0
-          ? tsFiles.length / (tsFiles.length + jsFiles.length)
-          : 0;
-      const strictMode = tsJson?.compilerOptions?.strict === true;
-      const hasLint = paths.some(
-        (p: string) =>
-          p.includes(".eslintrc") ||
-          p.includes(".prettierrc") ||
-          p.includes("biome.json") ||
-          p.includes("eslint.config")
-      );
+function Handoff() {
+  return (
+    <section className="section handoff" id="handoff" aria-labelledby="handoff-title">
+      <div>
+        <p className="eyebrow">Handoff</p>
+        <h2 id="handoff-title">
+          Same shell, two destinations: GitHub for review, playground for publish.
+        </h2>
+        <p>
+          The repository stays clean — Vite, React, TypeScript, no extra runtime deps. Once you sign
+          into the playground with X, the same app can be lifted there without rewriting.
+        </p>
+        <div className="handoff-actions">
+          <a className="primary-action" href="https://playground.gitlawb.com/" target="_blank" rel="noreferrer">
+            Open hosted playground
+          </a>
+          <a
+            className="secondary-action"
+            href="https://github.com/GitAxolotl/gitaxolotl"
+            target="_blank"
+            rel="noreferrer"
+          >
+            View on GitHub
+          </a>
+        </div>
+      </div>
+      <ul className="checklist" aria-label="Handoff checklist">
+        <li>
+          <strong>Repository</strong>
+          <span>Vite + React + TypeScript, no runtime deps beyond React.</span>
+        </li>
+        <li>
+          <strong>Design</strong>
+          <span>Restrained palette, one type scale, accessible focus rings.</span>
+        </li>
+        <li>
+          <strong>Quality</strong>
+          <span>Lint, build, contrast, and responsive checks before publish.</span>
+        </li>
+        <li>
+          <strong>Playground</strong>
+          <span>Single-file shell so it ports cleanly to the hosted runtime.</span>
+        </li>
+      </ul>
+    </section>
+  );
+}
 
-      let licType = "Unknown";
-      if (hasLicense) {
-        const lc = (await ghFile(owner, repo, "LICENSE")) || "";
-        if (lc.includes("MIT")) licType = "MIT";
-        else if (lc.includes("Apache")) licType = "Apache 2.0";
-        else if (lc.includes("GNU GPL")) licType = "GPL";
-        else if (lc.includes("BSD")) licType = "BSD";
-        else licType = "Custom";
-      }
+/* -------------------- root -------------------- */
 
-      const hasBuildStep = wfContent.includes("build");
-      const hasTestStep = wfContent.includes("test");
-      const hasDeployStep = wfContent.includes("deploy") || wfContent.includes("publish");
-      const hasLintScript = pkgJson?.scripts?.lint || pkgJson?.scripts?.format;
-      const hasPrettier = paths.some(
-        (p: string) => p.includes(".prettierrc") || p.includes("prettier.config")
-      );
+export default function App() {
+  const [kind, setKind] = useState<SourceKind>("repo");
+  const [value, setValue] = useState<string>(SOURCE_EXAMPLES.repo[0]);
+  const [briefState, setBriefState] = useState<BriefState>({ status: "idle" });
+  const inputRef = useRef<HTMLInputElement>(null);
+  const briefTimerRef = useRef<number | null>(null);
 
-      const rLen = readme?.length || 0;
-      const rSections = (readme?.match(/^## /gm) || []).length;
-      const rCode = (readme?.match(/```/g) || []).length / 2;
+  const resolved = useMemo(() => normalizeSource(kind, value), [kind, value]);
+  const profile = kind === "repo" ? REPO_PROFILE : SITE_PROFILE;
 
-      const analysis: AnalysisResult = {
-        owner,
-        repo,
-        fullName: info.full_name,
-        description: info.description || "",
-        stars: info.stargazers_count,
-        forks: info.forks_count,
-        language: info.language || "Unknown",
-        languages: langs,
-        fileCount: files.length,
-        totalSize,
-        defaultBranch: info.default_branch,
-        topics: info.topics || [],
-        lastUpdated: info.updated_at,
-        readmeLength: rLen,
-        readmeSections: rSections,
-        readmeCodeBlocks: rCode,
-        hasReadme: !!readme,
-        hasCI,
-        workflowCount: wfArr.length,
-        hasBuildStep,
-        hasTestStep,
-        hasDeployStep,
-        hasTests,
-        testFiles: testFiles.length,
-        testRatio,
-        hasTS,
-        tsRatio,
-        strictMode,
-        hasLinting: hasLint,
-        hasLintScript: !!hasLintScript,
-        hasPrettier,
-        hasLicense,
-        licenseType: licType,
-        filePaths: paths,
-      };
-
-      setResult(analysis);
-      addAudit("Indexer", `Stack: ${hasTS ? "TypeScript" : "JavaScript"}${paths.some((p: string) => p.endsWith(".py")) ? ", Python" : ""}`);
-      addAudit("Indexer", `Tests: ${testFiles.length} files (${(testRatio * 100).toFixed(0)}%) | CI: ${hasCI ? `${wfArr.length} workflows` : "No"} | TS: ${hasTS ? `${(tsRatio * 100).toFixed(0)}%` : "No"}`);
-
-      // Update pipeline — Intake done
-      setPipeline((p) =>
-        p.map((s) =>
-          s.id === "intake"
-            ? { ...s, status: "done", detail: `${files.length} files, ${Object.keys(langs).length} languages`, duration: lap() }
-            : s
-        )
-      );
-
-      // Quality Gates — DATA-DRIVEN
-      let rScore = 0;
-      if (readme) {
-        rScore = 20;
-        if (rLen > 500) rScore += 15;
-        if (rLen > 2000) rScore += 15;
-        if (rSections >= 3) rScore += 15;
-        if (rCode >= 2) rScore += 10;
-        if (
-          readme?.toLowerCase().includes("install") ||
-          readme?.toLowerCase().includes("getting started")
-        )
-          rScore += 10;
-        if (
-          readme?.toLowerCase().includes("usage") ||
-          readme?.toLowerCase().includes("example")
-        )
-          rScore += 10;
-        if (
-          readme?.includes("![") &&
-          (readme?.includes("shield") || readme?.includes("badge"))
-        )
-          rScore += 5;
-      }
-      let cScore = 0;
-      if (hasCI) {
-        cScore = 40;
-        if (wfArr.length >= 2) cScore += 15;
-        if (hasBuildStep) cScore += 15;
-        if (hasTestStep) cScore += 15;
-        if (hasDeployStep) cScore += 15;
-      }
-      let tScore = 0;
-      if (hasTests) {
-        tScore = 30;
-        if (testRatio > 0.1) tScore += 20;
-        if (testRatio > 0.3) tScore += 20;
-        if (testRatio > 0.5) tScore += 15;
-        if (paths.some((p: string) => p.includes("jest.config") || p.includes("vitest.config")))
-          tScore += 15;
-      }
-      let tsScore = 0;
-      if (hasTS) {
-        tsScore = 40;
-        if (tsRatio > 0.5) tsScore += 20;
-        if (tsRatio > 0.8) tsScore += 15;
-        if (strictMode) tsScore += 25;
-      }
-      let lScore = 0;
-      if (hasLint) {
-        lScore = 50;
-        if (hasLintScript) lScore += 25;
-        if (hasPrettier) lScore += 25;
-      }
-      const licScore = hasLicense ? 100 : 0;
-
-      const evidenceFor = (id: string): string[] => {
-        switch (id) {
-          case "readme":
-            return [
-              `${rLen} characters`,
-              `${rSections} sections`,
-              `${rCode} code blocks`,
-            ];
-          case "ci":
-            return [
-              `${wfArr.length} workflow(s)`,
-              hasBuildStep ? "build step" : "no build",
-              hasTestStep ? "test step" : "no test",
-              hasDeployStep ? "deploy step" : "no deploy",
-            ];
-          case "tests":
-            return [
-              `${testFiles.length} test files`,
-              `${(testRatio * 100).toFixed(0)}% ratio`,
-              hasTests ? "test config detected" : "no config",
-            ];
-          case "ts":
-            return [
-              `${(tsRatio * 100).toFixed(0)}% TypeScript`,
-              strictMode ? "strict mode" : "no strict mode",
-              `${tsFiles.length} TS files, ${jsFiles.length} JS files`,
-            ];
-          case "lint":
-            return [
-              hasLint ? "linter configured" : "no linter",
-              hasLintScript ? "lint script available" : "no lint script",
-              hasPrettier ? "prettier configured" : "no prettier",
-            ];
-          case "license":
-            return [hasLicense ? `${licType} license` : "no license file"];
-          default:
-            return [];
-        }
-      };
-
-      const newGates: Gate[] = [
-        {
-          id: "readme",
-          title: "Documentation quality",
-          owner: "Indexer",
-          score: rScore,
-          state: rScore >= 70 ? "passed" : rScore >= 40 ? "review" : "queued",
-          detail: readme
-            ? `${rLen} chars, ${rSections} sections, ${rCode} code blocks`
-            : "Missing README.md",
-          evidence: evidenceFor("readme"),
-        },
-        {
-          id: "ci",
-          title: "CI/CD pipeline",
-          owner: "Release",
-          score: cScore,
-          state: cScore >= 70 ? "passed" : cScore >= 40 ? "review" : "queued",
-          detail: hasCI
-            ? `${wfArr.length} workflow(s): ${[hasBuildStep && "build", hasTestStep && "test", hasDeployStep && "deploy"].filter(Boolean).join(" → ")}`
-            : "No CI pipeline found",
-          evidence: evidenceFor("ci"),
-        },
-        {
-          id: "tests",
-          title: "Test coverage",
-          owner: "Compiler",
-          score: tScore,
-          state: tScore >= 70 ? "passed" : tScore >= 40 ? "review" : "queued",
-          detail: hasTests
-            ? `${testFiles.length} test files, ${(testRatio * 100).toFixed(0)}% ratio`
-            : "No test files found",
-          evidence: evidenceFor("tests"),
-        },
-        {
-          id: "ts",
-          title: "Type safety",
-          owner: "Compiler",
-          score: tsScore,
-          state: tsScore >= 70 ? "passed" : tsScore >= 40 ? "review" : "queued",
-          detail: hasTS
-            ? `${(tsRatio * 100).toFixed(0)}% TypeScript${strictMode ? ", strict mode" : ""}`
-            : "JavaScript only",
-          evidence: evidenceFor("ts"),
-        },
-        {
-          id: "lint",
-          title: "Code style",
-          owner: "Interface",
-          score: lScore,
-          state: lScore >= 70 ? "passed" : lScore >= 40 ? "review" : "queued",
-          detail: hasLint
-            ? `Linter configured${hasLintScript ? ", script available" : ""}${hasPrettier ? ", prettier" : ""}`
-            : "No linter config found",
-          evidence: evidenceFor("lint"),
-        },
-        {
-          id: "license",
-          title: "License",
-          owner: "Release",
-          score: licScore,
-          state: hasLicense ? "passed" : "queued",
-          detail: hasLicense ? `${licType} license` : "No license file",
-          evidence: evidenceFor("license"),
-        },
-      ];
-      setGates(newGates);
-      addAudit("Reviewer", `Quality gates evaluated — ${newGates.filter((g) => g.state === "passed").length}/${newGates.length} passed`);
-
-      // Agents — based on analysis
-      const topLang = Object.entries(langs)
-        .sort(([, a], [, b]) => (b as number) - (a as number))
-        .slice(0, 1)
-        .map(([l]) => l)[0] || "Unknown";
-
-      setAgents([
-        { name: "AXO", role: "Editor", focus: "Keeps scope sharp", load: Math.min(95, Math.floor(files.length / 3)) },
-        { name: "FORGE", role: "Build engineer", focus: `${topLang} output`, load: hasCI ? 63 : 20 },
-        { name: "CIPHER", role: "Trust reviewer", focus: "Checks risk", load: hasLicense ? 34 : 80 },
-        { name: "NEXUS", role: "Publisher", focus: "Ships clean", load: hasTests ? 51 : 15 },
-      ]);
-
-      // Pipeline — Brief
-      setPipeline((p) =>
-        p.map((s) =>
-          s.id === "brief"
-            ? { ...s, status: "active", detail: "Generating brief..." }
-            : s
-        )
-      );
-
-      // Generate brief
-      setBrief({ status: "generating", startedAt: Date.now() });
-      const topLangs = Object.entries(langs)
-        .sort(([, a], [, b]) => (b as number) - (a as number))
-        .slice(0, 3)
-        .map(([l]) => l);
-
-      const briefResult: Brief = {
-        title: info.name,
-        summary: info.description || "No description provided.",
-        wordCount: 0,
-        generatedInMs: 0,
-        decisions: [
-          { kind: "keep", text: `${topLangs.join(", ")} stack` },
-          { kind: "keep", text: `${files.length} source files` },
-          hasTests ? { kind: "keep", text: "Test suite present" } : { kind: "cut", text: "No tests — flag for review" },
-          hasCI ? { kind: "keep", text: "CI/CD pipeline" } : { kind: "cut", text: "No CI — manual deploy only" },
-          { kind: "rename", text: `Target: playground.gitlawb.com` },
-        ].filter(Boolean) as BriefDecision[],
-        componentsPlanned: Math.max(3, Math.min(12, Math.floor(files.length / 3))),
-      };
-      briefResult.wordCount = briefResult.summary.split(/\s+/).length + briefResult.decisions.length * 8;
-      briefResult.generatedInMs = Date.now() - (brief.status === "generating" ? brief.startedAt : Date.now());
-      setBrief({ status: "ready", brief: briefResult });
-      addAudit("Editor", `Brief locked at ${briefResult.wordCount} words.`);
-      setPipeline((p) =>
-        p.map((s) =>
-          s.id === "brief"
-            ? { ...s, status: "done", detail: `${briefResult.wordCount} words`, duration: lap() }
-            : s
-        )
-      );
-
-      // Pipeline — Build
-      setPipeline((p) =>
-        p.map((s) =>
-          s.id === "build"
-            ? { ...s, status: "active", detail: "Preparing components..." }
-            : s
-        )
-      );
-      addAudit("Compiler", `${briefResult.componentsPlanned} components planned, strict mode ${strictMode ? "safe" : "off"}`);
-      setPipeline((p) =>
-        p.map((s) =>
-          s.id === "build"
-            ? { ...s, status: "done", detail: `${briefResult.componentsPlanned} components`, duration: lap() }
-            : s
-        )
-      );
-
-      // Pipeline — Verify
-      setPipeline((p) =>
-        p.map((s) =>
-          s.id === "verify"
-            ? { ...s, status: "active", detail: "Running verification..." }
-            : s
-        )
-      );
-      addAudit("Reviewer", `Contrast and focus pass on all surfaces.`);
-      addAudit("Release", `Publish handoff ready. Score: ${Math.round(newGates.reduce((s, g) => s + g.score, 0) / newGates.length)}/100`);
-      setPipeline((p) =>
-        p.map((s) =>
-          s.id === "verify"
-            ? { ...s, status: "done", detail: "All checks passed", duration: lap() }
-            : s
-        )
-      );
-
-      addAudit("Release", `Analysis complete in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-    } catch (err: any) {
-      setError(err.message);
-      addAudit("Error", err.message);
-      setPipeline((p) =>
-        p.map((s) =>
-          s.status === "active" ? { ...s, status: "error", detail: err.message } : s
-        )
-      );
-    } finally {
-      setIsAnalyzing(false);
+  const cancelPendingBrief = () => {
+    if (briefTimerRef.current !== null) {
+      window.clearTimeout(briefTimerRef.current);
+      briefTimerRef.current = null;
     }
   };
 
-  /* -------------------- helpers -------------------- */
-
-  const fmt = (n: number) =>
-    n >= 1000000
-      ? `${(n / 1000000).toFixed(1)}M`
-      : n >= 1000
-        ? `${(n / 1000).toFixed(1)}K`
-        : n.toString();
-
-  const fmtSize = (bytes: number) =>
-    bytes > 1000000
-      ? `${(bytes / 1000000).toFixed(1)}MB`
-      : bytes > 1000
-        ? `${(bytes / 1000).toFixed(0)}KB`
-        : `${bytes}B`;
-
-  const gateColor = (state: Gate["state"]) =>
-    state === "passed" ? "#00ff66" : state === "review" ? "#ffaa00" : "#555";
-
-  const stepIcon = (status: StepStatus) =>
-    status === "done" ? "✓" : status === "active" ? "●" : status === "error" ? "✗" : "○";
-
-  const stepColor = (status: StepStatus) =>
-    status === "done"
-      ? "#00ff66"
-      : status === "active"
-        ? "#ffaa00"
-        : status === "error"
-          ? "#ff2a2a"
-          : "#555";
-
-  /* -------------------- styles -------------------- */
-
-  const surface: CSSProperties = {
-    background: "#0d0f14",
-    border: "1px solid #1a1d24",
-    borderRadius: 4,
+  // Reset whenever the user changes source — explicit, no effect needed.
+  const updateKind = (next: SourceKind) => {
+    setKind(next);
+    cancelPendingBrief();
+    setBriefState({ status: "idle" });
   };
 
-  const label: CSSProperties = {
-    fontSize: 10,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.05em",
-    color: "#555",
-    fontWeight: 500,
+  const updateValue = (next: string) => {
+    setValue(next);
+    cancelPendingBrief();
+    setBriefState({ status: "idle" });
   };
 
-  /* -------------------- render -------------------- */
+  useEffect(
+    () => () => {
+      if (briefTimerRef.current !== null) {
+        window.clearTimeout(briefTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const jumpToBuilder = () => {
+    const node = document.getElementById("builder");
+    if (node) {
+      const prefersReducedMotion =
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      node.scrollIntoView({
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+        block: "start",
+      });
+    }
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const generateBrief = () => {
+    const brief = buildBrief(kind, resolved);
+    setBriefState({ status: "generating", startedAt: performance.now() });
+    cancelPendingBrief();
+    briefTimerRef.current = window.setTimeout(() => {
+      setBriefState({ status: "ready", brief });
+      briefTimerRef.current = null;
+    }, brief.generatedInMs);
+  };
+
+  const resetBrief = () => {
+    cancelPendingBrief();
+    setBriefState({ status: "idle" });
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea") return;
+      if (event.key === "/") {
+        event.preventDefault();
+        jumpToBuilder();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#07090d",
-        color: "#e0e0e0",
-        fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-        fontSize: 13,
-        lineHeight: 1.6,
-      }}
-    >
-      {/* Header */}
-      <header
-        style={{
-          borderBottom: "1px solid #1a1d24",
-          padding: "14px 24px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: "#00ff66", fontSize: 16, fontWeight: 700 }}>⬡</span>
-          <span style={{ color: "#fff", fontWeight: 600, fontSize: 14 }}>
-            gitaxolotl
+    <div className="app-shell">
+      <Topbar kind={kind} source={resolved} />
+      <main>
+        <Hero profile={profile} onJumpToBuilder={jumpToBuilder} />
+        <Builder
+          kind={kind}
+          setKind={updateKind}
+          value={value}
+          setValue={updateValue}
+          resolved={resolved}
+          profile={profile}
+          briefState={briefState}
+          onSubmit={generateBrief}
+          onReset={resetBrief}
+          inputRef={inputRef}
+        />
+        <Pipeline />
+        <Quality />
+        <Crew />
+        <Audit />
+        <Handoff />
+        <footer className="page-footer">
+          <span>GitAxolotl · part of the GitLawB network.</span>
+          <span className="kbd-hint">
+            Press <kbd>/</kbd> to focus the source field
           </span>
-          <span style={{ color: "#555", fontSize: 11 }}>builder control room</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {nodeStatus && (
-            <span style={{ color: "#555", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#00ff66" }} />
-              node v{nodeStatus.version}
-            </span>
-          )}
-          <a
-            href="https://playground.gitlawb.com"
-            target="_blank"
-            rel="noopener"
-            style={{ color: "#555", fontSize: 11, textDecoration: "none" }}
-          >
-            playground ↗
-          </a>
-          <a
-            href="https://github.com/GitAxolotl/gitaxolotl"
-            target="_blank"
-            rel="noopener"
-            style={{ color: "#555", fontSize: 11, textDecoration: "none" }}
-          >
-            github ↗
-          </a>
-        </div>
-      </header>
-
-      {/* Main grid */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 320px",
-          minHeight: "calc(100vh - 47px)",
-        }}
-      >
-        {/* Left — main */}
-        <div style={{ padding: 24, overflowY: "auto" }}>
-          {/* Source intake */}
-          <section style={{ marginBottom: 32 }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                marginBottom: 16,
-              }}
-            >
-              <span style={{ color: "#555", fontSize: 14 }}>⊡</span>
-              <span style={label}>Source Intake</span>
-            </div>
-
-            {/* Kind tabs */}
-            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-              {(["repo", "site"] as SourceKind[]).map((k) => (
-                <button
-                  key={k}
-                  onClick={() => {
-                    setSourceKind(k);
-                    setSourceValue("");
-                  }}
-                  style={{
-                    padding: "5px 12px",
-                    background: sourceKind === k ? "#1a1d24" : "transparent",
-                    border: `1px solid ${sourceKind === k ? "#333" : "#1a1d24"}`,
-                    color: sourceKind === k ? "#fff" : "#555",
-                    fontSize: 11,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    borderRadius: 2,
-                  }}
-                >
-                  {k === "repo" ? "GitHub Repo" : "Live Site"}
-                </button>
-              ))}
-            </div>
-
-            {/* Input */}
-            <form
-              onSubmit={(e: FormEvent) => {
-                e.preventDefault();
-                analyze();
-              }}
-              style={{ display: "flex", gap: 8 }}
-            >
-              <input
-                ref={inputRef}
-                value={sourceValue}
-                onChange={(e) => setSourceValue(e.target.value)}
-                placeholder={
-                  sourceKind === "repo"
-                    ? "owner/repo or github.com/…"
-                    : "https://example.com"
-                }
-                style={{
-                  flex: 1,
-                  padding: "10px 14px",
-                  background: "#0d0f14",
-                  border: "1px solid #1a1d24",
-                  color: "#fff",
-                  fontSize: 13,
-                  fontFamily: "inherit",
-                  outline: "none",
-                  borderRadius: 2,
-                }}
-              />
-              <button
-                type="submit"
-                disabled={isAnalyzing || !sourceValue.trim()}
-                style={{
-                  padding: "10px 20px",
-                  background: isAnalyzing ? "#1a1d24" : "#00ff66",
-                  border: "none",
-                  color: isAnalyzing ? "#555" : "#000",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: isAnalyzing ? "wait" : "pointer",
-                  fontFamily: "inherit",
-                  borderRadius: 2,
-                }}
-              >
-                {isAnalyzing ? "Analyzing…" : "Analyze"}
-              </button>
-            </form>
-
-            {/* Examples */}
-            {!result && !isAnalyzing && (
-              <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {SOURCE_EXAMPLES[sourceKind].map((ex) => (
-                  <button
-                    key={ex}
-                    onClick={() => setSourceValue(ex)}
-                    style={{
-                      padding: "3px 10px",
-                      background: "#0d0f14",
-                      border: "1px solid #1a1d24",
-                      color: "#555",
-                      fontSize: 10,
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                      borderRadius: 2,
-                    }}
-                  >
-                    {ex}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {error && (
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: 10,
-                  background: "#1a0002",
-                  border: "1px solid #3a0004",
-                  color: "#ff5555",
-                  fontSize: 12,
-                  borderRadius: 2,
-                }}
-              >
-                {error}
-              </div>
-            )}
-          </section>
-
-          {/* Repo info */}
-          {result && (
-            <section style={{ marginBottom: 32 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  marginBottom: 16,
-                }}
-              >
-                <span style={{ color: "#555", fontSize: 14 }}>⊡</span>
-                <span style={label}>Repository</span>
-                <span style={{ marginLeft: "auto", color: "#555", fontSize: 10 }}>
-                  {result.language} • {fmtSize(result.totalSize)}
-                </span>
-              </div>
-
-              <div style={{ ...surface, padding: 20 }}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    marginBottom: 16,
-                  }}
-                >
-                  <div>
-                    <h2
-                      style={{
-                        color: "#fff",
-                        fontSize: 18,
-                        fontWeight: 600,
-                        margin: "0 0 6px 0",
-                      }}
-                    >
-                      {result.fullName}
-                    </h2>
-                    <p style={{ color: "#888", fontSize: 12, margin: 0 }}>
-                      {result.description}
-                    </p>
-                  </div>
-                  <div style={{ display: "flex", gap: 16 }}>
-                    <div style={{ textAlign: "center" }}>
-                      <div style={{ color: "#ffaa00", fontSize: 16, fontWeight: 700 }}>
-                        {fmt(result.stars)}
-                      </div>
-                      <div style={{ color: "#555", fontSize: 10 }}>stars</div>
-                    </div>
-                    <div style={{ textAlign: "center" }}>
-                      <div style={{ color: "#00bcff", fontSize: 16, fontWeight: 700 }}>
-                        {fmt(result.forks)}
-                      </div>
-                      <div style={{ color: "#555", fontSize: 10 }}>forks</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Stats */}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(4, 1fr)",
-                    gap: 12,
-                    marginBottom: 16,
-                  }}
-                >
-                  {[
-                    { l: "Language", v: result.language },
-                    { l: "Files", v: result.fileCount.toString() },
-                    { l: "Size", v: fmtSize(result.totalSize) },
-                    { l: "Branch", v: result.defaultBranch },
-                  ].map((s) => (
-                    <div
-                      key={s.l}
-                      style={{
-                        background: "#07090d",
-                        padding: 10,
-                        borderRadius: 2,
-                        border: "1px solid #1a1d24",
-                      }}
-                    >
-                      <div style={{ color: "#555", fontSize: 10, marginBottom: 4 }}>
-                        {s.l}
-                      </div>
-                      <div style={{ color: "#fff", fontSize: 13, fontWeight: 600 }}>
-                        {s.v}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Languages bar */}
-                {Object.keys(result.languages).length > 0 && (
-                  <div>
-                    <div
-                      style={{
-                        display: "flex",
-                        height: 4,
-                        borderRadius: 2,
-                        overflow: "hidden",
-                        marginBottom: 8,
-                      }}
-                    >
-                      {Object.entries(result.languages)
-                        .sort(([, a], [, b]) => (b as number) - (a as number))
-                        .slice(0, 5)
-                        .map(([lang, bytes], i) => {
-                          const total = Object.values(result.languages).reduce(
-                            (s, v) => (s as number) + (v as number),
-                            0
-                          ) as number;
-                          const colors = ["#00ff66", "#00bcff", "#ffaa00", "#ff00cc", "#ff2a2a"];
-                          return (
-                            <div
-                              key={lang}
-                              style={{
-                                width: `${((bytes as number) / total) * 100}%`,
-                                background: colors[i % 5],
-                              }}
-                            />
-                          );
-                        })}
-                    </div>
-                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                      {Object.entries(result.languages)
-                        .sort(([, a], [, b]) => (b as number) - (a as number))
-                        .slice(0, 5)
-                        .map(([lang, bytes], i) => {
-                          const total = Object.values(result.languages).reduce(
-                            (s, v) => (s as number) + (v as number),
-                            0
-                          ) as number;
-                          const colors = ["#00ff66", "#00bcff", "#ffaa00", "#ff00cc", "#ff2a2a"];
-                          return (
-                            <span key={lang} style={{ fontSize: 10, color: "#888" }}>
-                              <span style={{ color: colors[i % 5] }}>●</span> {lang}{" "}
-                              {(((bytes as number) / total) * 100).toFixed(1)}%
-                            </span>
-                          );
-                        })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Topics */}
-                {result.topics.length > 0 && (
-                  <div
-                    style={{
-                      marginTop: 12,
-                      display: "flex",
-                      gap: 6,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    {result.topics.map((t) => (
-                      <span
-                        key={t}
-                        style={{
-                          padding: "2px 8px",
-                          background: "#1a1d24",
-                          color: "#00bcff",
-                          fontSize: 10,
-                          borderRadius: 2,
-                        }}
-                      >
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
-
-          {/* Pipeline */}
-          {pipeline.length > 0 && (
-            <section style={{ marginBottom: 32 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  marginBottom: 16,
-                }}
-              >
-                <span style={{ color: "#555", fontSize: 14 }}>⊡</span>
-                <span style={label}>Pipeline</span>
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {pipeline.map((step) => (
-                  <div
-                    key={step.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      padding: "10px 14px",
-                      background:
-                        step.status === "active" ? "#0d1a0d" : "#0d0f14",
-                      border: `1px solid ${step.status === "active" ? "#00ff6622" : "#1a1d24"}`,
-                      borderRadius: 2,
-                    }}
-                  >
-                    <span
-                      style={{
-                        color: stepColor(step.status),
-                        fontSize: 14,
-                        width: 20,
-                        textAlign: "center",
-                      }}
-                    >
-                      {stepIcon(step.status)}
-                    </span>
-                    <span
-                      style={{
-                        color: step.status === "queued" ? "#555" : "#fff",
-                        fontSize: 12,
-                        fontWeight: 500,
-                        minWidth: 80,
-                      }}
-                    >
-                      {step.title}
-                    </span>
-                    <span style={{ color: "#555", fontSize: 11, flex: 1 }}>
-                      {step.detail}
-                    </span>
-                    <span style={{ color: "#444", fontSize: 10 }}>
-                      {step.duration}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* Quality gates */}
-          {gates.length > 0 && (
-            <section style={{ marginBottom: 32 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  marginBottom: 16,
-                }}
-              >
-                <span style={{ color: "#555", fontSize: 14 }}>⊡</span>
-                <span style={label}>Quality Gates</span>
-                <span
-                  style={{
-                    marginLeft: "auto",
-                    color:
-                      Math.round(gates.reduce((s, g) => s + g.score, 0) / gates.length) >= 70
-                        ? "#00ff66"
-                        : "#ffaa00",
-                    fontSize: 14,
-                    fontWeight: 700,
-                  }}
-                >
-                  {Math.round(gates.reduce((s, g) => s + g.score, 0) / gates.length)}/100
-                </span>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 8,
-                }}
-              >
-                {gates.map((gate) => (
-                  <div
-                    key={gate.id}
-                    style={{
-                      ...surface,
-                      padding: 14,
-                      borderColor: gateColor(gate.state) + "22",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        marginBottom: 8,
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: "50%",
-                          background: gateColor(gate.state),
-                          boxShadow: `0 0 6px ${gateColor(gate.state)}`,
-                        }}
-                      />
-                      <span style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>
-                        {gate.title}
-                      </span>
-                      <span
-                        style={{
-                          marginLeft: "auto",
-                          color: gateColor(gate.state),
-                          fontSize: 13,
-                          fontWeight: 700,
-                        }}
-                      >
-                        {gate.score}
-                      </span>
-                    </div>
-                    <div style={{ color: "#888", fontSize: 11, marginBottom: 8 }}>
-                      {gate.detail}
-                    </div>
-                    <div style={{ color: "#555", fontSize: 10 }}>
-                      {gate.evidence.map((e, i) => (
-                        <div key={i}>→ {e}</div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
-
-        {/* Right — sidebar */}
-        <div
-          style={{
-            borderLeft: "1px solid #1a1d24",
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-          {/* Brief */}
-          <div style={{ padding: "16px 20px", borderBottom: "1px solid #1a1d24" }}>
-            <div style={label}>App Brief</div>
-            {brief.status === "idle" && (
-              <div style={{ color: "#333", fontSize: 11, marginTop: 8, fontStyle: "italic" }}>
-                Analyze a source to generate a brief.
-              </div>
-            )}
-            {brief.status === "generating" && (
-              <div style={{ color: "#ffaa00", fontSize: 11, marginTop: 8 }}>
-                Generating…
-              </div>
-            )}
-            {brief.status === "ready" && (
-              <div style={{ marginTop: 8 }}>
-                <div
-                  style={{
-                    color: "#fff",
-                    fontSize: 14,
-                    fontWeight: 600,
-                    marginBottom: 6,
-                  }}
-                >
-                  {brief.brief.title}
-                </div>
-                <div style={{ color: "#888", fontSize: 11, marginBottom: 10 }}>
-                  {brief.brief.summary}
-                </div>
-                <div style={{ color: "#555", fontSize: 10, marginBottom: 6 }}>
-                  {brief.brief.wordCount} words • {brief.brief.componentsPlanned}{" "}
-                  components planned
-                </div>
-                <div>
-                  {brief.brief.decisions.map((d, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        fontSize: 10,
-                        color: d.kind === "keep" ? "#00ff66" : d.kind === "cut" ? "#ff2a2a" : "#ffaa00",
-                        marginBottom: 2,
-                      }}
-                    >
-                      {d.kind === "keep" ? "✓" : d.kind === "cut" ? "✗" : "→"} {d.text}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Agents */}
-          {agents.length > 0 && (
-            <div style={{ padding: "16px 20px", borderBottom: "1px solid #1a1d24" }}>
-              <div style={{ ...label, marginBottom: 12 }}>Builder Crew</div>
-              {agents.map((a) => (
-                <div
-                  key={a.name}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    marginBottom: 10,
-                  }}
-                >
-                  <span
-                    style={{
-                      color: "#fff",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      minWidth: 40,
-                    }}
-                  >
-                    {a.name}
-                  </span>
-                  <div style={{ flex: 1 }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        marginBottom: 3,
-                      }}
-                    >
-                      <span style={{ color: "#888", fontSize: 10 }}>{a.role}</span>
-                      <span style={{ color: "#555", fontSize: 10 }}>{a.load}%</span>
-                    </div>
-                    <div
-                      style={{
-                        height: 3,
-                        background: "#1a1d24",
-                        borderRadius: 2,
-                        overflow: "hidden",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${a.load}%`,
-                          height: "100%",
-                          background:
-                            a.load > 80 ? "#ff2a2a" : a.load > 50 ? "#ffaa00" : "#00ff66",
-                          borderRadius: 2,
-                          transition: "width 0.3s",
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Audit log */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-            <div style={{ padding: "16px 20px 8px" }}>
-              <div style={label}>Activity Log</div>
-            </div>
-            <div
-              style={{
-                flex: 1,
-                overflowY: "auto",
-                padding: "0 20px 16px",
-              }}
-            >
-              {audit.length === 0 ? (
-                <div style={{ color: "#333", fontSize: 11, fontStyle: "italic" }}>
-                  No activity yet
-                </div>
-              ) : (
-                audit.map((row, i) => (
-                  <div key={i} style={{ marginBottom: 4, fontSize: 11 }}>
-                    <span style={{ color: "#444", marginRight: 8 }}>{row.time}</span>
-                    <span style={{ color: "#00ff66", marginRight: 6 }}>{row.source}</span>
-                    <span style={{ color: "#888" }}>{row.message}</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Handoff */}
-          {result && (
-            <div style={{ padding: "16px 20px", borderTop: "1px solid #1a1d24" }}>
-              <div style={{ ...label, marginBottom: 10 }}>Handoff</div>
-              <a
-                href="https://playground.gitlawb.com"
-                target="_blank"
-                rel="noopener"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: 10,
-                  ...surface,
-                  color: "#00ff66",
-                  fontSize: 12,
-                  textDecoration: "none",
-                  marginBottom: 8,
-                }}
-              >
-                ↗ Open in Playground
-              </a>
-              <a
-                href={`https://github.com/${result.fullName}`}
-                target="_blank"
-                rel="noopener"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: 10,
-                  ...surface,
-                  color: "#888",
-                  fontSize: 12,
-                  textDecoration: "none",
-                }}
-              >
-                ↗ View on GitHub
-              </a>
-            </div>
-          )}
-        </div>
-      </div>
+        </footer>
+      </main>
     </div>
   );
 }
+
