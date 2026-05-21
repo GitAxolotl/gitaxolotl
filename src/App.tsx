@@ -8,6 +8,9 @@ import {
   type RefObject,
 } from "react";
 
+/* React 19 unwraps Promises from useEffect cleanup correctly; AbortSignal
+   here is just a defensive guard for fast-typers. */
+
 /* ============================================================
    GitAxolotl — builder control room
    A calm, restrained surface for turning a GitHub repository or a
@@ -60,6 +63,27 @@ type AuditRow = {
   source: string;
   message: string;
 };
+
+type BriefDecisionKind = "keep" | "cut" | "rename";
+
+type BriefDecision = {
+  kind: BriefDecisionKind;
+  text: string;
+};
+
+type Brief = {
+  title: string;
+  summary: string;
+  wordCount: number;
+  generatedInMs: number;
+  decisions: BriefDecision[];
+  componentsPlanned: number;
+};
+
+type BriefState =
+  | { status: "idle" }
+  | { status: "generating"; startedAt: number }
+  | { status: "ready"; brief: Brief };
 
 const SOURCE_EXAMPLES: Record<SourceKind, string[]> = {
   repo: [
@@ -242,6 +266,42 @@ function stepStatusLabel(status: StepStatus): string {
   if (status === "done") return "Done";
   if (status === "active") return "Running";
   return "Queued";
+}
+
+/* Deterministic brief synthesis. Same input -> same output. No LLM, no
+   pretend streaming — just a tight summary the eye can scan. */
+function buildBrief(kind: SourceKind, resolved: string): Brief {
+  const isRepo = kind === "repo";
+  const profile = isRepo ? REPO_PROFILE : SITE_PROFILE;
+  const label = isRepo ? "repository" : "live site";
+  const summary = isRepo
+    ? `A Vite + React + TypeScript ${label} at ${resolved}. Ship the same shell as a calm builder control room — keep source intake, pipeline, and quality gates. Drop dashboard slop. Single primary action, four named gates, one publish handoff.`
+    : `A multi-page ${label} at ${resolved}. Reduce to one builder shell with a single primary action ("Configure source"), one source-preview panel, four named gates, and a publish handoff. No marketing hero, no carousel.`;
+  const decisions: BriefDecision[] = isRepo
+    ? [
+        { kind: "keep", text: "Single-file React shell, quality gates, pipeline." },
+        { kind: "cut", text: "Decorative animations and emoji rain." },
+        { kind: "rename", text: '"Healing dashboard" → "Builder control room".' },
+      ]
+    : [
+        { kind: "keep", text: "Source intake, examples list, owner ribbons." },
+        { kind: "cut", text: "Hero carousel and partner logos." },
+        { kind: "rename", text: '"Try our AI" → "Generate brief".' },
+      ];
+  return {
+    title: `App brief — ${profile.title}`,
+    summary,
+    wordCount: summary.split(/\s+/).filter(Boolean).length,
+    generatedInMs: isRepo ? 920 : 1180,
+    decisions,
+    componentsPlanned: isRepo ? 12 : 9,
+  };
+}
+
+function decisionLabel(kind: BriefDecisionKind): string {
+  if (kind === "keep") return "Keep";
+  if (kind === "cut") return "Cut";
+  return "Rename";
 }
 
 /* -------------------- mascot -------------------- */
@@ -543,7 +603,9 @@ function Builder({
   setValue,
   resolved,
   profile,
+  briefState,
   onSubmit,
+  onReset,
   inputRef,
 }: {
   kind: SourceKind;
@@ -552,13 +614,22 @@ function Builder({
   setValue: (v: string) => void;
   resolved: string;
   profile: SourceProfile;
+  briefState: BriefState;
   onSubmit: () => void;
+  onReset: () => void;
   inputRef: RefObject<HTMLInputElement | null>;
 }) {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     onSubmit();
   };
+  const generating = briefState.status === "generating";
+  const ready = briefState.status === "ready";
+  const submitLabel = generating
+    ? "Generating…"
+    : ready
+      ? "Regenerate brief"
+      : "Generate brief";
 
   return (
     <section className="builder" id="builder" aria-labelledby="builder-title">
@@ -614,8 +685,13 @@ function Builder({
           </ul>
 
           <div className="builder-actions">
-            <button type="submit" className="primary-action">
-              Generate brief
+            <button
+              type="submit"
+              className="primary-action"
+              disabled={generating}
+              aria-busy={generating}
+            >
+              {submitLabel}
             </button>
             <span className="resolved" aria-live="polite">
               Resolved as <strong>{resolved}</strong>
@@ -623,34 +699,78 @@ function Builder({
           </div>
         </form>
 
-        <article className="source-card" aria-label="Source preview">
-          <header>
-            <div>
-              <p className="eyebrow muted">{profile.subtitle}</p>
-              <h3>{profile.title}</h3>
-            </div>
-            <span className="badge subtle">{profile.language}</span>
-          </header>
+        {ready ? (
+          <BriefPanel brief={briefState.brief} onReset={onReset} />
+        ) : (
+          <article
+            className={classNames("source-card", generating && "is-generating")}
+            aria-label="Source preview"
+            aria-busy={generating}
+          >
+            <header>
+              <div>
+                <p className="eyebrow muted">{profile.subtitle}</p>
+                <h3>{profile.title}</h3>
+              </div>
+              <span className="badge subtle">{profile.language}</span>
+            </header>
 
-          <ul className="source-pages">
-            {profile.pages.map((page) => (
-              <li key={page}>
-                <span className="page-bullet" aria-hidden="true" />
-                <code>{page}</code>
-              </li>
-            ))}
-          </ul>
-
-          <footer>
-            <ul className="source-signals">
-              {profile.signals.map((signal) => (
-                <li key={signal}>{signal}</li>
+            <ul className="source-pages">
+              {profile.pages.map((page) => (
+                <li key={page}>
+                  <span className="page-bullet" aria-hidden="true" />
+                  <code>{page}</code>
+                </li>
               ))}
             </ul>
-          </footer>
-        </article>
+
+            <footer>
+              <ul className="source-signals">
+                {profile.signals.map((signal) => (
+                  <li key={signal}>{signal}</li>
+                ))}
+              </ul>
+              {generating && (
+                <p className="source-generating" aria-live="polite">
+                  <span className="dot-pulse" aria-hidden="true" />
+                  Reading {profile.files} files, {profile.routes} routes…
+                </p>
+              )}
+            </footer>
+          </article>
+        )}
       </div>
     </section>
+  );
+}
+
+function BriefPanel({ brief, onReset }: { brief: Brief; onReset: () => void }) {
+  return (
+    <article className="brief-panel" aria-label="Generated brief">
+      <header>
+        <p className="eyebrow muted">App brief</p>
+        <h3>{brief.title}</h3>
+        <button type="button" className="brief-reset" onClick={onReset}>
+          Reset
+        </button>
+      </header>
+      <p className="brief-summary">{brief.summary}</p>
+      <ul className="brief-decisions" aria-label="Decisions">
+        {brief.decisions.map((decision) => (
+          <li key={decision.kind} className={decision.kind}>
+            <span className="brief-decision-tag">{decisionLabel(decision.kind)}</span>
+            <span>{decision.text}</span>
+          </li>
+        ))}
+      </ul>
+      <footer className="brief-meta">
+        <span>{brief.wordCount} words</span>
+        <span aria-hidden="true">·</span>
+        <span>{(brief.generatedInMs / 1000).toFixed(2)}s</span>
+        <span aria-hidden="true">·</span>
+        <span>{brief.componentsPlanned} components planned</span>
+      </footer>
+    </article>
   );
 }
 
@@ -764,32 +884,86 @@ function Quality() {
 
 /* -------------------- agents -------------------- */
 
+function shouldRevealImmediately(): boolean {
+  if (typeof IntersectionObserver === "undefined") return true;
+  if (typeof window === "undefined") return true;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 function Crew() {
+  const sectionRef = useRef<HTMLElement>(null);
+  const [revealed, setRevealed] = useState<boolean>(() => shouldRevealImmediately());
+
+  useEffect(() => {
+    if (revealed) return;
+    const node = sectionRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setRevealed(true);
+            observer.disconnect();
+            break;
+          }
+        }
+      },
+      { threshold: 0.35 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [revealed]);
+
   return (
-    <section className="section crew" aria-labelledby="crew-title">
+    <section ref={sectionRef} className="section crew" aria-labelledby="crew-title">
       <div className="section-heading compact">
         <p className="eyebrow">Builder crew</p>
         <h2 id="crew-title">Agents with specific jobs. No vague magic.</h2>
       </div>
       <div className="agent-grid">
         {AGENTS.map((agent) => (
-          <article key={agent.name} className="agent-card">
-            <div
-              className="agent-load"
-              style={{ "--load": `${agent.load}%` } as CSSProperties}
-              aria-hidden="true"
-            >
-              <span>{agent.load}</span>
-            </div>
-            <header>
-              <h3>{agent.name}</h3>
-              <p>{agent.role}</p>
-            </header>
-            <footer>{agent.focus}</footer>
-          </article>
+          <AgentCard key={agent.name} agent={agent} revealed={revealed} />
         ))}
       </div>
     </section>
+  );
+}
+
+function AgentCard({ agent, revealed }: { agent: Agent; revealed: boolean }) {
+  const [display, setDisplay] = useState(0);
+
+  useEffect(() => {
+    if (!revealed) return;
+    const duration = 720;
+    const start = performance.now();
+    const from = 0;
+    const to = agent.load;
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(Math.round(from + (to - from) * eased));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [revealed, agent.load]);
+
+  return (
+    <article className="agent-card">
+      <div
+        className="agent-load"
+        style={{ "--load": `${revealed ? agent.load : 0}%` } as CSSProperties}
+        aria-hidden="true"
+      >
+        <span>{display}</span>
+      </div>
+      <header>
+        <h3>{agent.name}</h3>
+        <p>{agent.role}</p>
+      </header>
+      <footer>{agent.focus}</footer>
+    </article>
   );
 }
 
@@ -870,10 +1044,41 @@ function Handoff() {
 export default function App() {
   const [kind, setKind] = useState<SourceKind>("repo");
   const [value, setValue] = useState<string>(SOURCE_EXAMPLES.repo[0]);
+  const [briefState, setBriefState] = useState<BriefState>({ status: "idle" });
   const inputRef = useRef<HTMLInputElement>(null);
+  const briefTimerRef = useRef<number | null>(null);
 
   const resolved = useMemo(() => normalizeSource(kind, value), [kind, value]);
   const profile = kind === "repo" ? REPO_PROFILE : SITE_PROFILE;
+
+  const cancelPendingBrief = () => {
+    if (briefTimerRef.current !== null) {
+      window.clearTimeout(briefTimerRef.current);
+      briefTimerRef.current = null;
+    }
+  };
+
+  // Reset whenever the user changes source — explicit, no effect needed.
+  const updateKind = (next: SourceKind) => {
+    setKind(next);
+    cancelPendingBrief();
+    setBriefState({ status: "idle" });
+  };
+
+  const updateValue = (next: string) => {
+    setValue(next);
+    cancelPendingBrief();
+    setBriefState({ status: "idle" });
+  };
+
+  useEffect(
+    () => () => {
+      if (briefTimerRef.current !== null) {
+        window.clearTimeout(briefTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const jumpToBuilder = () => {
     const node = document.getElementById("builder");
@@ -886,6 +1091,22 @@ export default function App() {
         block: "start",
       });
     }
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const generateBrief = () => {
+    const brief = buildBrief(kind, resolved);
+    setBriefState({ status: "generating", startedAt: performance.now() });
+    cancelPendingBrief();
+    briefTimerRef.current = window.setTimeout(() => {
+      setBriefState({ status: "ready", brief });
+      briefTimerRef.current = null;
+    }, brief.generatedInMs);
+  };
+
+  const resetBrief = () => {
+    cancelPendingBrief();
+    setBriefState({ status: "idle" });
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
@@ -910,12 +1131,14 @@ export default function App() {
         <Hero profile={profile} onJumpToBuilder={jumpToBuilder} />
         <Builder
           kind={kind}
-          setKind={setKind}
+          setKind={updateKind}
           value={value}
-          setValue={setValue}
+          setValue={updateValue}
           resolved={resolved}
           profile={profile}
-          onSubmit={jumpToBuilder}
+          briefState={briefState}
+          onSubmit={generateBrief}
+          onReset={resetBrief}
           inputRef={inputRef}
         />
         <Pipeline />
